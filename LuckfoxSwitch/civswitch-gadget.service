@@ -1,0 +1,12 @@
+[Unit]
+Description=CivSwitch USB HID gadget setup
+After=local-fs.target
+Conflicts=S50usbdevice.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/civswitch/usb-gadget-hid.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,6 @@
+node_modules/
+build-pico1/
+build-pico2/
+*.uf2
+package-lock.json
+payload.txt

@@ -1,0 +1,14 @@
+[Unit]
+Description=CivSwitch USB HID macro
+After=civswitch-gadget.service
+Requires=civswitch-gadget.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/civswitch/civswitch.py /opt/civswitch/payload.txt
+RemainAfterExit=yes
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

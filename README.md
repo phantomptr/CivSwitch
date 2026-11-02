@@ -1,70 +1,101 @@
 # CivSwitch
 
-XSS toolchain for the Switch 1 edition of Civilization 7.  
-Only the **1.0.0** version of the game in physical cartridge is supported.  
+XSS toolchain for the Nintendo Switch edition of Civilization 7.  
+Only the **1.0.0** version of the game on physical cartridge is supported.
 
-Every switch 1/2 firmware 20.x.x and up to current version (23.0.1) should work.  
+Compatible with Switch 1/2 firmware 20.x.x through current (23.0.1).  
+Tested on Switch 1 fw 22.5.0, Switch 2 fw 20.4.0 and 23.0.1.
 
-Tested at Switch 1 fw 22.5.0, Switch 2 fw 20.4.0 and 23.0.1  
+## Components
 
-Two components:
+| Component | Description |
+| --------- | ----------- |
+| **PicoSwitch** | Raspberry Pi Pico firmware (RP2040 + RP2350). Types the chat-XSS payload into the Switch as a USB HID macro. Ships with `compress.js` for payload generation. |
+| **LuckfoxSwitch** | Linux USB gadget port for the Luckfox Pico family, Raspberry Pi Zero, BeagleBone, and other Linux SBCs. Same HID device, same payload — no firmware build needed. |
+| **installer-creator** | Produces the boot-persistent installer (`XSTRIG.Civ7Save` trigger) from any JavaScript payload, sent through the Remote JS Loader. |
 
-- **PicoSwitch** — clean, compilable Pico firmware (RP2040 + RP2350) that types a chat-XSS payload into the Switch (USB HID macro).
+`core.js` is the shared exploit payload. `send_js.py` sends any payload to a running loader.
 
-  Default payload = the Remote JS Loader bootstrap (exploit core + TCP loader).
+## Quick Start
 
-  Ships with `compress.js` (chat transport: terser -> deflateRaw -> base-25 chunked `img/onerror` lines with censor armor).
-- **installer-creator** — given any JavaScript payload, produces the boot-persistent installer (`XSTRIG.Civ7Save` trigger written to savedata) to send through the Remote JS Loader.
+### 1. Get the device ready
 
-## Layout
+**Option A — Raspberry Pi Pico (easiest)**  
+Download `civ7-pico1.uf2` (RP2040) or `civ7-pico2.uf2` (RP2350) from [Releases](../../releases).  
+Hold BOOTSEL, plug the Pico into your PC, drag the UF2 onto the drive. Done.
 
-`core.js` at the root is the shared payload both components build from, and `send_js.py` at the root sends any payload to a running loader.
+**Option B — Linux SBC (Luckfox Pico, Pi Zero, BeagleBone, etc.)**  
+Download `LuckfoxSwitch.tar.gz` from [Releases](../../releases).  
+Copy to the board and install — see [LuckfoxSwitch/README.md](LuckfoxSwitch/README.md) for details.
 
-## Workflow
+### 2. Prepare the Switch
 
-[Video Tutorial](https://www.reddit.com/r/switch2hacks/comments/1xll4wf/civswitch_hack_start_to_finish/) from switch2hacks reddit
+1. **System** menu → change system language to **English(US)**
+2. **Controllers & Accessories** menu → change USB Keyboard to **English(US)**
+3. Connect to the internet using [90DNS](https://gitlab.com/a/90dns) to block Nintendo servers
 
-1. **Build + flash** the loader UF2 (see PicoSwitch/README.md).
+> Language settings are required so the Switch types English characters via USB keyboard.  
+> Higher firmware versions may not need the system language change.
 
-   On the Switch, go to "System" menu and change system language to English(US).  
-   Go to "Controllers & Accessories" menu and change USB Keyboard to English(US).  
-   
-   These are required to type "English" letters (code) using USB keyboard.  
-   (Higher fw might not need to change system language as they support typing english without language change)  
-   
-   Connect to Internet using [90DNS](https://gitlab.com/a/90dns) to block Nintendo servers.  
-   Then launch game and navigate main menu -> MULTIPLAYER -> WIRELESS -> CREATE GAME -> HOST LOBBY -> CHAT then plug the Pico in (in docked mode, focus the chat box first to receive Pico input).  
+### 3. Run the payload
 
-   The Pico types the chat XSS (~87 lines, ~15 min); the Remote JS Loader comes up on the console (TCP :9026) for that session.  
-2. **Install the persistent boot trigger** from the PC: `python installer-creator/install.py <console-ip>` — uploads the save template, splices the compressed payload into it on-console, wipes `save:/saves/Single/`, and writes the trigger.
-3. From then on, every boot: main menu -> Load Game -> the payload runs from savedata (and if the payload is the loader, :9026 is up at boot — and survives console sleep/wake).  
-4. You can revert system language after installer finished.  
+1. Launch Civ 7 → **MULTIPLAYER** → **WIRELESS** → **CREATE GAME** → **HOST LOBBY** → **CHAT**
+2. Plug the device into the Switch (docked mode: focus the chat box first)
+3. Wait ~15 minutes while it types all ~87 lines into chat
+4. The Remote JS Loader comes up on the console at TCP port 9026
 
-## Sending payloads (`send_js.py`)
+### 4. Install the persistent boot trigger
+
+```
+python installer-creator/install.py <console-ip>
+```
+
+This uploads a save file with the compressed payload. From then on: **main menu → Load Game** runs the payload automatically (and if it's the loader, port 9026 is up at boot and survives sleep/wake).
+
+You can revert system language after the installer finishes.
+
+## Sending payloads
 
 ```
 python send_js.py <console-ip> [port] file.js
 ```
 
-Sends a JS file as-is to the Remote JS Loader (default port 9026), then prints the log output the console streams back (read until close or timeout).  
+Sends a JS file to the Remote JS Loader (default port 9026) and prints the log output streamed back.
 
-## Build (Pico firmware)
+## Building from source
 
-On Ubuntu 24.04:
+Most users should download pre-built files from [Releases](../../releases). Build from source only if you've modified `core.js` or the firmware.
 
-```
-sudo apt install -y git build-essential cmake ninja-build gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib python3 nodejs npm
-git clone --branch 2.3.1 --depth 1 --recurse-submodules --shallow-submodules https://github.com/raspberrypi/pico-sdk.git ~/pico-sdk
+### Pico firmware (Ubuntu 24.04)
+
+```bash
+sudo apt install -y git build-essential cmake ninja-build gcc-arm-none-eabi \
+  libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib python3 nodejs npm
+git clone --branch 2.3.1 --depth 1 --recurse-submodules --shallow-submodules \
+  https://github.com/raspberrypi/pico-sdk.git ~/pico-sdk
 export PICO_SDK_PATH=$HOME/pico-sdk
+
 cd PicoSwitch
 npm install                    # terser for compress.js
 node compress.js               # reads ../core.js -> payload.txt
-cmake --preset pico2 && cmake --build --preset pico2    # RP2350 -> build-pico2/src/civ7-pico2.uf2
-cmake --preset pico1 && cmake --build --preset pico1    # RP2040 -> build-pico1/src/civ7-pico1.uf2
+cmake --preset pico2 && cmake --build --preset pico2    # RP2350
+cmake --preset pico1 && cmake --build --preset pico1    # RP2040
+```
+
+### Linux SBC payload
+
+```bash
+cd PicoSwitch
+npm install
+node compress.js               # reads ../core.js -> payload.txt
+cp payload.txt ../LuckfoxSwitch/
+
+scp -r LuckfoxSwitch/ root@<board-ip>:/tmp/
+ssh root@<board-ip> 'cd /tmp/LuckfoxSwitch && bash install.sh'
+ssh root@<board-ip> 'systemctl enable civswitch-gadget civswitch && reboot'
 ```
 
 ## Credits
 
-- The JS exploit core in `core.js` referenced [inject.js](https://github.com/NetflixNHack/Netflix-N-Hack/blob/main/inject.js) from [Netflix-N-Hack](https://github.com/NetflixNHack/Netflix-N-Hack) and its fork by [ufm42](https://github.com/ufm42/Netflix-N-Hack/blob/main/inject.js) 
+- The JS exploit core in `core.js` referenced [inject.js](https://github.com/NetflixNHack/Netflix-N-Hack/blob/main/inject.js) from [Netflix-N-Hack](https://github.com/NetflixNHack/Netflix-N-Hack) and its fork by [ufm42](https://github.com/ufm42/Netflix-N-Hack/blob/main/inject.js)
 - The PicoSwitch firmware is based on [Pico-Switch-Controller](https://github.com/Element2424/Pico-Switch-Controller) by [Element2424](https://github.com/Element2424)
-
