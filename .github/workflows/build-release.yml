@@ -34,6 +34,9 @@ jobs:
           git clone --branch 2.3.1 --depth 1 --recurse-submodules --shallow-submodules https://github.com/raspberrypi/pico-sdk.git /tmp/pico-sdk
 
       # --- Build firmware ---
+      - name: Fix script permissions
+        run: chmod +x PicoSwitch/tools/*.py
+
       - name: Build pico2 (RP2350)
         working-directory: PicoSwitch
         env:
