@@ -2,8 +2,8 @@
 """CivSwitch macro engine for Linux USB gadget boards.
 
 Reads payload.txt and types the chat-XSS payload into the Switch via
-/dev/hidg0 (gamepad) and /dev/hidg1 (keyboard), matching the exact
-timing and report format of the PicoSwitch RP2040 firmware.
+/dev/hidg0 (gamepad) and /dev/hidg1 (keyboard), using the Pico firmware's
+macro states and nominal timing. Linux controls USB descriptors and polling.
 
 Works on any Linux board with USB gadget support (Luckfox Pico Pro,
 Raspberry Pi Zero, BeagleBone, etc.).
@@ -11,10 +11,109 @@ Raspberry Pi Zero, BeagleBone, etc.).
 Usage: civswitch.py [payload.txt]
 """
 
-import struct
-import sys
-import time
+import argparse
 import os
+import select
+import signal
+import struct
+import threading
+import time
+from pathlib import Path
+
+
+class HIDEndpoint:
+    """Keep one HID interface reporting, independently of macro sleeps.
+
+    Nonblocking I/O lets shutdown and host output processing continue even
+    when the host stops polling. A state change is acknowledged only after
+    it has been queued to the kernel, so a short button press isn't skipped.
+    This acknowledges queueing, not delivery to the Switch's application.
+    """
+
+    def __init__(self, path, initial_report, echo_output=False):
+        self.fd = os.open(path, os.O_RDWR | os.O_NONBLOCK)
+        os.set_blocking(self.fd, False)
+        self.report = initial_report
+        self.echo_output = echo_output
+        self.condition = threading.Condition()
+        self.generation = 0
+        self.sent_generation = -1
+        self.error = None
+        self.stopped = threading.Event()
+        self.worker = threading.Thread(target=self._run, daemon=True)
+        self.worker.start()
+
+    def _run(self):
+        echo = None
+        try:
+            while not self.stopped.is_set():
+                readable, writable, _ = select.select(
+                    [self.fd] if echo is None else [], [self.fd], [], 0.05)
+                if readable:
+                    try:
+                        output = os.read(self.fd, 64)
+                    except BlockingIOError:
+                        output = None
+                    if output == b'':
+                        raise OSError('USB HID host disconnected')
+                    if output:
+                        if self.echo_output:
+                            echo = output
+                        else:
+                            # Match the Pico keyboard SET_REPORT callback.
+                            set_led(bool(output[0] & 0x02))
+                if writable:
+                    with self.condition:
+                        report, generation = self.report, self.generation
+                    packet = echo if echo is not None else report
+                    try:
+                        written = os.write(self.fd, packet)
+                    except BlockingIOError:
+                        continue
+                    if written != len(packet):
+                        raise OSError('Short USB HID write')
+                    if echo is not None:
+                        echo = None
+                    else:
+                        with self.condition:
+                            self.sent_generation = generation
+                            self.condition.notify_all()
+                    # Pico sends whenever TinyUSB is ready. The gadget driver
+                    # still determines the actual endpoint polling interval.
+                    self.stopped.wait(0.001)
+        except OSError as error:
+            with self.condition:
+                self.error = error
+                self.condition.notify_all()
+
+    def send(self, report):
+        deadline = time.monotonic() + 2.0
+        with self.condition:
+            if self.stopped.is_set():
+                raise OSError('USB HID endpoint is closed')
+            self.report = report
+            self.generation += 1
+            generation = self.generation
+            while self.sent_generation < generation:
+                if self.error is not None:
+                    raise self.error
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError('USB host is not accepting HID reports')
+                self.condition.wait(remaining)
+
+    def check(self):
+        with self.condition:
+            if self.error is not None:
+                raise self.error
+
+    def close(self):
+        if not self.stopped.is_set():
+            self.stopped.set()
+            with self.condition:
+                self.condition.notify_all()
+            self.worker.join()
+            os.close(self.fd)
 
 # --- Timing constants (match PicoSwitch tools/payload_to_macro.py) ---
 KEY_HOLD_S = 0.032
@@ -98,18 +197,40 @@ ASCII_TO_HID.update({
 
 class HIDWriter:
     def __init__(self, gamepad_dev='/dev/hidg0', keyboard_dev='/dev/hidg1'):
-        self.gamepad_fd = os.open(gamepad_dev, os.O_WRONLY)
-        self.keyboard_fd = os.open(keyboard_dev, os.O_WRONLY)
+        self.gamepad = HIDEndpoint(gamepad_dev, GAMEPAD_NEUTRAL, echo_output=True)
+        try:
+            self.keyboard = HIDEndpoint(keyboard_dev, KBD_RELEASE)
+        except OSError:
+            self.gamepad.close()
+            raise
+        self.closed = False
 
     def close(self):
-        os.close(self.gamepad_fd)
-        os.close(self.keyboard_fd)
+        if not self.closed:
+            self.closed = True
+            try:
+                for endpoint, neutral in ((self.gamepad, GAMEPAD_NEUTRAL),
+                                           (self.keyboard, KBD_RELEASE)):
+                    try:
+                        endpoint.send(neutral)
+                    except OSError:
+                        pass  # The host may already have disconnected.
+            finally:
+                self.gamepad.close()
+                self.keyboard.close()
+
+    def wait(self):
+        # The Pico keeps sending neutral reports after MACRO_OP_END too.
+        while True:
+            self.gamepad.check()
+            self.keyboard.check()
+            time.sleep(0.1)
 
     def send_gamepad(self, report):
-        os.write(self.gamepad_fd, report)
+        self.gamepad.send(report)
 
     def send_keyboard(self, report):
-        os.write(self.keyboard_fd, report)
+        self.keyboard.send(report)
 
     def press_a(self, hold_s=A_PRESS_S):
         self.send_gamepad(GAMEPAD_A)
@@ -144,6 +265,15 @@ def set_led(on):
         pass
 
 
+def wait_for_usb(udc_root='/sys/class/udc'):
+    states = list(Path(udc_root).glob('*/state'))
+    if not states:
+        raise RuntimeError('No USB device controller found; set up the HID gadget first')
+    print('CivSwitch: waiting for USB host configuration...', flush=True)
+    while not any(state.read_text().strip() == 'configured' for state in states):
+        time.sleep(0.1)
+
+
 def run_macro(payload_path):
     with open(payload_path, encoding='utf-8') as f:
         lines = [l for l in f.read().splitlines() if l.strip()]
@@ -152,13 +282,12 @@ def run_macro(payload_path):
         print('No payload lines to type.')
         return
 
-    print(f'CivSwitch: {len(lines)} line(s), starting in {START_DELAY_S}s...')
-    time.sleep(START_DELAY_S)
-
+    wait_for_usb()
     hid = HIDWriter()
-    set_led(True)
-
     try:
+        print(f'CivSwitch: {len(lines)} line(s), starting in {START_DELAY_S}s...')
+        time.sleep(START_DELAY_S)
+        set_led(True)
         # Preamble: press A x5
         for i in range(PREAMBLE_A_COUNT):
             hid.press_a()
@@ -188,12 +317,45 @@ def run_macro(payload_path):
                 time.sleep(POST_A_WAIT_S)
 
         print('CivSwitch: macro complete.')
+        set_led(False)
+        hid.wait()
     finally:
         set_led(False)
         hid.close()
 
 
+def run_controller_test():
+    """Send only the Pico's five-A preamble, with a released keyboard."""
+    wait_for_usb()
+    hid = HIDWriter()
+    try:
+        print('CivSwitch: controller test; five A presses, no text.', flush=True)
+        time.sleep(START_DELAY_S)
+        for _ in range(PREAMBLE_A_COUNT):
+            hid.press_a()
+            time.sleep(PREAMBLE_GAP_S)
+        print('CivSwitch: controller test complete; reports now neutral.', flush=True)
+        hid.wait()
+    finally:
+        hid.close()
+
+
 if __name__ == '__main__':
-    payload = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), 'payload.txt')
-    run_macro(payload)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('payload', nargs='?', default=os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), 'payload.txt'))
+    parser.add_argument('--test-controller', action='store_true',
+                        help='send the five-A preamble only; never type the payload')
+    args = parser.parse_args()
+
+    def stop(signum, frame):
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, stop)
+    try:
+        if args.test_controller:
+            run_controller_test()
+        else:
+            run_macro(args.payload)
+    except KeyboardInterrupt:
+        print('CivSwitch: stopped.', flush=True)

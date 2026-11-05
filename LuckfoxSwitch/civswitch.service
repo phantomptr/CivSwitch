@@ -4,9 +4,10 @@ After=civswitch-gadget.service
 Requires=civswitch-gadget.service
 
 [Service]
-Type=oneshot
+Type=simple
+Environment=PYTHONUNBUFFERED=1
 ExecStart=/opt/civswitch/civswitch.py /opt/civswitch/payload.txt
-RemainAfterExit=yes
+TimeoutStopSec=5
 StandardOutput=journal+console
 StandardError=journal+console
 

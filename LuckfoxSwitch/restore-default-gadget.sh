@@ -8,9 +8,15 @@ set -euo pipefail
 
 echo "Restoring default USB gadget..."
 
+if [ -x /etc/init.d/S99zz-civswitch ]; then
+    echo off > /etc/civswitch-mode
+    /etc/init.d/S99zz-civswitch stop
+fi
+
 # Disable CivSwitch services
 systemctl disable civswitch-gadget.service 2>/dev/null || true
 systemctl disable civswitch.service 2>/dev/null || true
+systemctl stop civswitch.service 2>/dev/null || true
 
 # Luckfox-specific: restart the rockchip default gadget
 if [ -x /etc/init.d/S50usbdevice ]; then

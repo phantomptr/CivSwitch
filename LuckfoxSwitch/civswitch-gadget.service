@@ -1,6 +1,7 @@
 [Unit]
 Description=CivSwitch USB HID gadget setup
-After=local-fs.target
+Wants=rc-local.service
+After=local-fs.target rc-local.service usb-ecm.service
 Conflicts=S50usbdevice.service
 
 [Service]

@@ -66,6 +66,13 @@ echo 0x0F0D > "$GADGET/idVendor"
 echo 0x0092 > "$GADGET/idProduct"
 echo 0x0100 > "$GADGET/bcdDevice"
 
+# Clear Microsoft OS descriptor settings inherited from RNDIS/ADB mode.
+if [ -f "$GADGET/os_desc/use" ]; then
+    echo 0 > "$GADGET/os_desc/use"
+fi
+echo 0x80 > "$GADGET/configs/b.1/bmAttributes"
+echo 500 > "$GADGET/configs/b.1/MaxPower"
+
 # Strings — detect existing directory name (some boards use 0x409, others 0x0409)
 if [ -d "$GADGET/strings/0x409" ]; then
     STRINGS="$GADGET/strings/0x409"
@@ -93,7 +100,10 @@ HID0="$GADGET/functions/hid.usb0"
 mkdir -p "$HID0"
 echo 0 > "$HID0/protocol"
 echo 0 > "$HID0/subclass"
-echo 8 > "$HID0/report_length"
+# f_hid uses report_length as the endpoint's wMaxPacketSize too. Pico's
+# gamepad endpoints allow 64-byte packets, although normal input is 8 bytes.
+# This also permits echoing host output packets without truncating them.
+echo 64 > "$HID0/report_length"
 
 # Gamepad report descriptor (86 bytes — matches switch_usb_report_descriptor)
 python3 -c "

@@ -11,7 +11,7 @@ Tested on Switch 1 fw 22.5.0, Switch 2 fw 20.4.0 and 23.0.1.
 | Component | Description |
 | --------- | ----------- |
 | **PicoSwitch** | Raspberry Pi Pico firmware (RP2040 + RP2350). Types the chat-XSS payload into the Switch as a USB HID macro. Ships with `compress.js` for payload generation. |
-| **LuckfoxSwitch** | Linux USB gadget port for the Luckfox Pico family, Raspberry Pi Zero, BeagleBone, and other Linux SBCs. Same HID device, same payload — no firmware build needed. |
+| **LuckfoxSwitch** | Linux USB gadget port with Pico-compatible reports and macro sequence. Supports standalone Luckfox Pico Pro onboard-flash startup, plus other SBCs with compatible USB gadget support. |
 | **installer-creator** | Produces the boot-persistent installer (`XSTRIG.Civ7Save` trigger) from any JavaScript payload, sent through the Remote JS Loader. |
 
 `core.js` is the shared exploit payload. `send_js.py` sends any payload to a running loader.
@@ -27,6 +27,8 @@ Hold BOOTSEL, plug the Pico into your PC, drag the UF2 onto the drive. Done.
 **Option B — Linux SBC (Luckfox Pico, Pi Zero, BeagleBone, etc.)**  
 Download `LuckfoxSwitch.tar.gz` from [Releases](../../releases).  
 Copy to the board and install — see [LuckfoxSwitch/README.md](LuckfoxSwitch/README.md) for details.
+
+The **Luckfox Pico Pro can run entirely from its onboard flash**, without an SD card or a connected computer. See the [onboard-flash setup](LuckfoxSwitch/README.md#luckfox-pico-pro-onboard-flash-without-an-sd-card), including the observed restart behavior when using `poweroff` and how to move the board to the Switch after enabling automatic typing.
 
 ### 2. Prepare the Switch
 

@@ -26,6 +26,12 @@ jobs:
           npm install
           node compress.js
 
+      - name: Verify Luckfox transport and Pico macro parity
+        run: |
+          python3 -B -m unittest discover -s LuckfoxSwitch -p 'test_*.py' -v
+          bash -n LuckfoxSwitch/usb-gadget-hid.sh LuckfoxSwitch/install.sh LuckfoxSwitch/restore-default-gadget.sh LuckfoxSwitch/run-on-boot.sh
+          sh -n LuckfoxSwitch/S99zz-civswitch
+
       # --- Pico SDK ---
       - name: Install ARM toolchain
         run: |

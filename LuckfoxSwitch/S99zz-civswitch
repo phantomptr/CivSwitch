@@ -1,0 +1,26 @@
+#!/bin/sh
+# Late BusyBox startup: run after Luckfox's default USB configuration.
+PIDFILE=/run/civswitch.pid
+MODEFILE=/etc/civswitch-mode
+
+case "${1:-}" in
+    start)
+        if [ -r "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+            exit 0
+        fi
+        mode=$(cat "$MODEFILE" 2>/dev/null || echo off)
+        case "$mode" in
+            off) exit 0 ;;
+            payload|controller-test) ;;
+            *) echo "CivSwitch: invalid mode '$mode'" >&2; exit 1 ;;
+        esac
+        start-stop-daemon -S -b -m -p "$PIDFILE" \
+            -x /opt/civswitch/run-on-boot.sh -- "$mode"
+        ;;
+    stop)
+        start-stop-daemon -K -p "$PIDFILE" -s TERM 2>/dev/null || true
+        rm -f "$PIDFILE"
+        ;;
+    restart) "$0" stop; "$0" start ;;
+    *) echo "Usage: $0 {start|stop|restart}" >&2; exit 1 ;;
+esac
