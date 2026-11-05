@@ -8,10 +8,27 @@ Verified end-to-end on **Switch 2** on 2026-11-05 using a Luckfox Pico Pro on it
 
 ## Compatible Boards
 
+### Luckfox hardware coverage
+
+The table below was checked against Luckfox's current product pages on 2026-11-05. "Verified" means a physical Switch 2 run; "same path" means the same official firmware and I/O layout but no separate CivSwitch hardware run; "candidate" means the board advertises a USB device-capable port, but its own Buildroot image and required userspace packages still need validation.
+
+| Luckfox family | Models checked | USB and memory | CivSwitch status |
+| --- | --- | --- | --- |
+| **Pico Pro / Max** | Pro (RV1106G2), Max (RV1106G3) | USB 2.0 Host/Device; 128 MB or 256 MB; 256 MB SPI NAND | **Pro: Switch 2 verified.** **Max: same path.** Both use the official `Luckfox_Pico_Pro_Max_Flash_250607` image and identical board layout. |
+| **RV1103 Pico family** | Pico, Mini A, Mini B, Plus, WebBee | USB 2.0 Host/Device; 64 MB RAM with about 35 MB usable under the stock 24 MB camera reservation | **Candidate, not verified.** Each model needs its own RV1103 Buildroot image plus Python 3, Bash, `start-stop-daemon`, configfs, and `usb_f_hid`. Pico and Mini A require microSD; Mini B, Plus, and WebBee can use SPI NAND. Do not flash the Pro/Max image. |
+| **Pico Ultra family** | Ultra, Ultra W, Ultra B, Ultra BW | USB 2.0 Host/Device; 128 MB or 256 MB; 8 GB eMMC | **Candidate, not verified.** Use the model-specific eMMC Buildroot image and select USB Device mode when required. Camera CMA reduction and userspace checks still apply. |
+| **Pico Pi family** | Pi A, Pi A W, Pi B, Pi B W | Dedicated USB Device port; 128 MB or 256 MB; 8 GB eMMC | **Candidate, not verified.** Hardware and Buildroot support are present; the DIP switch must be in USB Device mode. |
+| **Pico Zero** | Zero | USB 2.0 Host/Device; 256 MB; 8 GB eMMC | **Candidate, not verified.** Use the Zero eMMC Buildroot image and confirm device mode, Python, and HID gadget support. |
+| **Pico 86-Panel** | 0208, 0408, 1208, 1408 | USB Device; 128 MB or 256 MB; 8 GB eMMC | **Candidate, not verified.** Use the model-specific eMMC Buildroot image and confirm the userspace requirements. |
+
+All current Luckfox Pico families advertise USB 2.0 device capability, so the CivSwitch design is portable to them. That is not the same as a tested image: the checked-in flashing guide, `env-cma4k.img`, static-address defaults, and stock USB restore path are specifically for Pro/Max. A candidate board must satisfy the generic requirements below and needs its own physical Switch test before it should be called supported.
+
+Official references: [Pro/Max](https://wiki.luckfox.com/Luckfox-Pico-Pro-Max/), [RV1103 family](https://wiki.luckfox.com/Luckfox-Pico/Luckfox-Pico-RV1103/), [Ultra](https://wiki.luckfox.com/Luckfox-Pico-Ultra/), [Pico Pi](https://wiki.luckfox.com/Luckfox-Pico-Pi/), [Zero](https://wiki.luckfox.com/Luckfox-Pico-Zero/), [86-Panel](https://wiki.luckfox.com/Luckfox-Pico-86-Panel/), [WebBee](https://www.luckfox.com/Luckfox-WebBee), and [memory reservations](https://wiki.luckfox.com/Luckfox-Pico-RV1106/FAQ/Memory-Storage/).
+
+### Other Linux SBCs
+
 | Board | USB Port | Status |
 | ----- | -------- | ------ |
-| **Luckfox Pico Pro** | USB-C OTG | **Switch 2 end-to-end verified:** 87/87 payload and loader startup on onboard Buildroot flash. |
-| **Other Luckfox Pico models** | Model dependent OTG port | Require compatible firmware and HID gadget support; not verified here. |
 | **Raspberry Pi Zero / Zero W / Zero 2 W** | Micro-USB OTG | Requires `dtoverlay=dwc2` in `/boot/config.txt` ([setup below](#raspberry-pi-zero)) |
 | **BeagleBone Black / Green** | Mini-USB client | Disable existing `g_multi` gadget first ([setup below](#beaglebone)) |
 | **Orange Pi Zero** | Micro-USB OTG | Allwinner SoC, gadget support via `musb_hdrc` |
@@ -29,7 +46,7 @@ Verified end-to-end on **Switch 2** on 2026-11-05 using a Luckfox Pico Pro on it
 
 ## Quick Start
 
-**Starting with a Luckfox Pico Pro that needs flashing?** Follow the [complete onboard-flash guide](FLASHING.md) first. It covers firmware extraction, the required `rk_dma_heap_cma=4K` environment, BOOT/Maskrom flashing, ADB checks, installation, host SSH setup, and moving USB to the Switch without an SD card.
+**Starting with a Luckfox Pico Pro or Max that needs flashing?** Follow the [complete onboard-flash guide](FLASHING.md) first. It covers firmware extraction, the required `rk_dma_heap_cma=4K` environment, BOOT/Maskrom flashing, ADB checks, installation, host SSH setup, and moving USB to the Switch without an SD card.
 
 ### 1. Download or generate the payload
 
@@ -82,7 +99,7 @@ The helper tries Ethernet `192.168.86.198`, USB RNDIS `192.168.77.1`, then the L
 
 Prepare the Switch **before** powering the board: the repo requires the physical Civ VII cartridge running game version **1.0.0**, with system language and USB keyboard layout set to **English (US)**. Navigate to **MULTIPLAYER → WIRELESS → CREATE GAME → HOST LOBBY → CHAT** and focus the chat input.
 
-The installer configures `eth0` as `192.168.86.198/24` with gateway `192.168.86.1` and, when the stock RNDIS interface is present, configures `usb0` as `192.168.77.1/24`. It leaves the stock RNDIS+ADB gadget in place and does **not** arm CivSwitch for the next boot. Test the single Mac SSH alias:
+On the verified Pro/Max path, the installer configures `eth0` as `192.168.86.198/24` with gateway `192.168.86.1` and, when the stock RNDIS interface is present, configures `usb0` as `192.168.77.1/24`. Models without Ethernet skip that address instead of failing installation. The installer leaves the stock RNDIS+ADB gadget in place and does **not** arm CivSwitch for the next boot. Test the single Mac SSH alias:
 
 ```bash
 ssh yunpengs-luckfox
@@ -105,7 +122,7 @@ While a job is active, USB SSH/RNDIS and ADB are replaced by the two HID interfa
 
 The late `/etc/init.d/S99zz-civswitch` startup exists only for an explicit opt-in. It reads `/etc/civswitch-mode`; the installer sets it to `off`, and `civswitchctl` also writes `off` so a manual run never arms the next boot. Logs are persisted under `/opt/civswitch/logs/`: `current.log` is the latest run and `previous.log` is retained when the next run starts. Each line boundary records the macro line, total line count, endpoint generations, queued report, write/output counts, and USB controller state; a failed run also records the current character, phase, and traceback.
 
-For the **Luckfox Pico Pro's onboard SPI NAND**, use the official Pro/Max **Flash Buildroot** image, not the Ubuntu SD-card image. Its 256 MB flash is sufficient; an SD card is optional and is used only for swap. The installer supports BusyBox init as well as systemd. On a systemd board the unit files remain available but are disabled by default; use `civswitchctl` for manual operation.
+For the **Luckfox Pico Pro / Max onboard SPI NAND**, use the official Pro/Max **Flash Buildroot** image, not the Ubuntu SD-card image. Its 256 MB flash is sufficient; an SD card is optional and is used only for swap. The installer supports BusyBox init as well as systemd. On a systemd board the unit files remain available but are disabled by default; use `civswitchctl` for manual operation.
 
 ### Verified Switch 2 configuration
 
@@ -196,9 +213,9 @@ Run from the repository root. Tests use actual local socket I/O to verify state-
 
 ## Board-Specific Setup
 
-### Luckfox Pico Pro: onboard flash without an SD card
+### Luckfox Pico Pro / Max: onboard flash without an SD card
 
-Follow the [step-by-step flashing and installation guide](FLASHING.md). It includes the tested firmware version and checksum, the `rk_dma_heap_cma=4K` boot-environment override, optional NAND backup commands, boot verification, and recovery. **BOOT is only for flashing; leave it released for normal use.** No computer connection is required while running on the Switch.
+Follow the [step-by-step flashing and installation guide](FLASHING.md). It includes the tested firmware version and checksum, the `rk_dma_heap_cma=4K` boot-environment override, optional NAND backup commands, boot verification, and recovery. The physical run used Pro; Max shares the same board layout and Pro/Max firmware. **BOOT is only for flashing; leave it released for normal use.** No computer connection is required while running on the Switch.
 
 The installer writes persistent Ethernet and USB-network addresses. The repository includes the Mac `luckfox-ssh-connect` helper and the single `yunpengs-luckfox` host stanza shown above. The installer also enables an SD-card swap partition when one labeled `CIVSWAP` is present; swap is optional and NAND remains the boot device.
 

@@ -660,6 +660,15 @@ class ManualDeploymentTests(unittest.TestCase):
         self.assertIn('ifconfig usb0', static_ip)
         self.assertIn('/etc/init.d/S99zz-ipstatic start', restore)
 
+    def test_static_network_setup_tolerates_models_without_ethernet(self):
+        static_ip = (self.root / 'set-static-ip.sh').read_text()
+        self.assertIn('ETH_IF="${CIVSWITCH_ETH_IF:-eth0}"', static_ip)
+        self.assertGreaterEqual(
+            static_ip.count('if [ -e "/sys/class/net/$ETH_IF" ]; then'), 2)
+        self.assertIn('Ethernet configuration skipped', static_ip)
+        self.assertNotIn('\nifconfig eth0 "$IP" netmask "$NETMASK" up\n',
+                         static_ip)
+
     def test_installer_normalizes_root_ssh_strict_modes(self):
         installer = (self.root / 'install.sh').read_text()
         self.assertIn('chown root:root /root', installer)

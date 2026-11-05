@@ -76,7 +76,7 @@ else
     echo "Installed for BusyBox init; automatic typing is OFF."
     echo "Manual control: civswitchctl {start|start-line N|test|stop|status}"
     echo "Run sync, then unplug USB from the computer and move it to the Switch."
-    echo "Do not reboot or poweroff while connected to the computer: this Pro may restart."
+    echo "Do not reboot or poweroff while connected to the computer: the board may restart."
     exit 0
 fi
 

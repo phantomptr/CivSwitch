@@ -1,6 +1,6 @@
-# Flash and set up a Luckfox Pico Pro without an SD card
+# Flash and set up a Luckfox Pico Pro / Max without an SD card
 
-This guide installs Buildroot onto the **Luckfox Pico Pro's onboard SPI NAND**, then installs CivSwitch with manual control over Ethernet SSH. No computer or SD card is required while using it on the Switch, although an optional card can provide swap. It is not a UF2 workflow: Raspberry Pi Pico1/Pico2 UF2 files cannot be flashed to this Linux board.
+This guide installs Buildroot onto the **Luckfox Pico Pro or Max onboard SPI NAND**, then installs CivSwitch with manual control over Ethernet SSH. The two boards share one official Pro/Max image and the same board layout; the physical CivSwitch run used a Pico Pro, while Max uses the same software path but has not been run separately. No computer or SD card is required while using it on the Switch, although an optional card can provide swap. It is not a UF2 workflow: Raspberry Pi Pico1/Pico2 UF2 files cannot be flashed to this Linux board.
 
 The procedure below was performed on a Pico Pro using macOS, `upgrade_tool` v2.44, and `Luckfox_Pico_Pro_Max_Flash_250607/update.img`. The final Switch 2 run completed **87/87**, brought up the Remote JS Loader, and installed the persistent `XSTRIG.Civ7Save` trigger. It made 357 gamepad and 23,437 keyboard state writes, kept USB configured, retained about 96 MB available, and did not need swap. Every key transition now waits for endpoint acceptance; unchanged reports are coalesced and Python memory is reclaimed at safe line boundaries. Logs remain on NAND across boots.
 
@@ -10,7 +10,7 @@ On the computer, install Git, Node.js/npm (to generate the payload), and Google'
 
 Download and extract these files:
 
-- The **Pro/Max Flash Buildroot image** from [Luckfox's official image downloads](https://wiki.luckfox.com/Luckfox-Pico-RV1106/Getting-Started/overview/). Select the Pro/Max SPI NAND/Flash image. Ubuntu and MicroSD/TF images are for a different boot setup.
+- The **Pro/Max Flash Buildroot image** from [Luckfox's official image downloads](https://wiki.luckfox.com/Luckfox-Pico-RV1106/Getting-Started/overview/). Select the Pro/Max SPI NAND/Flash image. This image supports both boards; do not use it on Pico, Mini, Plus, Ultra, Pi, Zero, WebBee, or 86-Panel models. Ubuntu and MicroSD/TF images are for a different boot setup.
 - The matching host version of **Rockchip upgrade_tool**, linked in [Luckfox's flashing instructions](https://wiki.luckfox.com/Luckfox-Pico-RV1106/Getting-Started/Image-flashing/). The tested Mac version was v2.44; use Luckfox's OS compatibility table for your computer.
 
 The extracted firmware directory should contain `update.img` and its matching `download.bin`. The tested image's SHA-256 was:
@@ -109,7 +109,7 @@ adb shell 'cat /proc/device-tree/model; echo; cat /proc/cmdline; grep -E "MemTot
 adb shell 'python3 --version; command -v bash; command -v start-stop-daemon; df -h /'
 ```
 
-Expect the Luckfox model, `root=ubi0:rootfs`, `storagemedia=mtd`, and `rk_dma_heap_cma=4K` in the kernel command line, plus Python, Bash, and `start-stop-daemon`. `MemTotal` should be near 120 MB and `CmaTotal` should be approximately 4 KiB. If the command line still says `1M` or omits the override, do not continue. The tested image included Python 3.11.6 and about 137 MB free after installation.
+Expect the Luckfox model, `root=ubi0:rootfs`, `storagemedia=mtd`, and `rk_dma_heap_cma=4K` in the kernel command line, plus Python, Bash, and `start-stop-daemon`. After the CMA override, the tested Pro reports about 120 MiB `MemTotal`; Max is expected to report roughly 248 MiB, but that figure has not been measured. `CmaTotal` should be approximately 4 KiB. If the command line still says `1M` or omits the override, do not continue. The tested Pro image included Python 3.11.6 and about 137 MB free after installation.
 
 The stock ADB device may identify itself as `Nexus_4` / `mako`; that is the vendor daemon's placeholder identity. Confirm the actual board through `/proc/device-tree/model`. If several ADB devices are connected, select this board with `adb -s <serial>` for subsequent commands.
 
