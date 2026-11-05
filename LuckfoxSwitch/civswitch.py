@@ -54,8 +54,10 @@ class HIDEndpoint:
                         output = os.read(self.fd, 64)
                     except BlockingIOError:
                         output = None
-                    if output == b'':
-                        raise OSError('USB HID host disconnected')
+                    # f_hid is packet-oriented: an empty completed OUT
+                    # transfer returns b'', not stream EOF. Ignore it like
+                    # Pico's keyboard callback (bufsize == 0). Real device
+                    # shutdown is reported by the gadget's I/O errors.
                     if output:
                         if self.echo_output:
                             echo = output
@@ -261,7 +263,9 @@ def set_led(on):
     try:
         with open('/sys/class/leds/work/brightness', 'w') as f:
             f.write('255' if on else '0')
-    except (FileNotFoundError, PermissionError):
+    except OSError:
+        # The status LED is optional. A sysfs failure must not terminate
+        # a HID worker while its last keyboard report still holds a key.
         pass
 
 

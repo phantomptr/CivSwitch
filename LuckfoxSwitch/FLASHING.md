@@ -2,7 +2,7 @@
 
 This guide installs Buildroot onto the **Luckfox Pico Pro's onboard SPI NAND**, then installs CivSwitch and enables standalone startup. No computer or SD card is needed while using it on the Switch. It is not a UF2 workflow: Raspberry Pi Pico1/Pico2 UF2 files cannot be flashed to this Linux board.
 
-The procedure below was performed on a Pico Pro using macOS, `upgrade_tool` v2.44, and `Luckfox_Pico_Pro_Max_Flash_250607/update.img`. Onboard boot, installation persistence, and neutral reports through both HID endpoints were verified. Initial operation on a physical Switch was reported; full payload completion and loader startup remain unconfirmed.
+The procedure below was performed on a Pico Pro using macOS, `upgrade_tool` v2.44, and `Luckfox_Pico_Pro_Max_Flash_250607/update.img`. Onboard boot, installation persistence, and neutral reports through both HID endpoints were verified. A physical Switch run typed lines 1–9 correctly, then stalled with a repeating `f`. The source now fixes two reproducible transport bugs; a Switch retest, full payload completion, and loader startup remain unconfirmed. Use the current repository rather than an older release archive.
 
 ## 1. Download the tools and firmware
 

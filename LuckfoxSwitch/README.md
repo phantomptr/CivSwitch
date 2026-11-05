@@ -2,7 +2,7 @@
 
 CivSwitch port for **Linux SBCs with USB gadget support**. Replaces the RP2040 firmware with a Python script and a shell-based USB gadget setup. It uses the Pico firmware's VID/PID (Hori 0x0F0D:0x0092), HID report descriptors, macro sequence, and nominal hold/wait times.
 
-Originally developed on the Luckfox Pico Pro. On 2026-11-04, the onboard-flash installation passed USB endpoint and reboot-persistence checks, and a user reported that it appeared to work on a physical Switch. Completion of the full payload and loader startup have not yet been confirmed. Linux gadget USB descriptors and control requests differ from TinyUSB; this is not a byte-for-byte replacement for Pico USB firmware.
+Originally developed on the Luckfox Pico Pro. On 2026-11-04, the onboard-flash installation passed USB endpoint and reboot-persistence checks. A subsequent physical Switch run typed lines 1–9 correctly, then stalled on line 10 with a repeating `f`. Host regression tests reproduced two transport bugs that could leave a key held: empty USB OUT packets were treated as disconnects, and optional LED I/O errors stopped HID reporting. Both are corrected in source; a Switch retest is pending. Full payload completion and loader startup have not yet been confirmed. Linux gadget USB descriptors and control requests differ from TinyUSB; this is not a byte-for-byte replacement for Pico USB firmware.
 
 ## Compatible Boards
 
@@ -123,9 +123,25 @@ python3 /opt/civswitch/civswitch.py      # run the macro
 
 Two independent nonblocking workers continuously transmit the current gamepad and keyboard states, including neutral reports during pauses and after the macro finishes. Gamepad output received from the host is echoed, matching the Pico SET_REPORT callback's interrupt-output behavior; keyboard LED output is consumed. Errors reach the macro instead of allowing silent progress after a disconnected endpoint.
 
+Empty host output packets are ignored rather than interpreted as stream EOF: [Luckfox's HID gadget driver](https://github.com/LuckfoxTECH/luckfox-pico/blob/main/sysdrv/source/kernel/drivers/usb/gadget/function/f_hid.c) can return zero bytes for a completed zero-length USB OUT transfer. Optional LED sysfs failures cannot stop HID reporting. These cases have regression tests, including an empty packet arriving while `f` is held and subsequent key/release delivery.
+
 The macro uses the Pico's nominal timing (32 ms key hold, 200 ms enter gap, 750 ms menu waits). Python scheduling and USB queueing add latency, so wall-clock timing is not guaranteed to be identical.
 
 ### What still differs from Pico USB firmware
+
+| Behavior | Pico1 / Pico2 | Current Luckfox port |
+| --- | --- | --- |
+| Macro report bytes and nominal holds/waits | Shared source and generated macro | Compared against the Pico generator by host tests |
+| USB transfer completion | TinyUSB endpoint readiness | Linux write queues a request; this is not proof of host receipt |
+| Endpoint addresses | Fixed in `SwitchConsts.h` | Assigned by the Linux gadget framework |
+| HID version | 1.11 | Stock HID driver advertises 1.01 |
+| Full-speed polling interval | 1 ms | Stock HID driver advertises 10 ms |
+| USB speed | Full-speed Pico device | Linux gadget can also negotiate high-speed |
+| Initial delay | One second from Pico boot | One second after Linux sees USB configured |
+| Gamepad control GET_REPORT | Callback returns 8 bytes | Linux returns zeros up to configured report length / host request length |
+| Control SET_REPORT with interrupt OUT enabled | TinyUSB callback handles it | Stock Linux HID driver stalls it |
+
+Matching the macro trace does not establish identical USB behavior. A custom gadget implementation would be needed to control the remaining descriptor and request differences; even then, Linux scheduling, the USB controller, and actual Switch acceptance require measurement. No USB traffic capture comparison against a working physical Pico1/Pico2 has been performed.
 
 Stock Linux `f_hid` assigns endpoint addresses and generates interface/HID descriptors. In upstream Linux 5.10, it advertises HID 1.01 rather than the Pico's 1.11, uses a 10 ms full-speed polling interval rather than 1 ms, and stalls control-endpoint SET_REPORT requests. Reading `/dev/hidg0` handles interrupt OUT packets, not those stalled control requests. The board vendor's kernel may differ; inspect its source or capture USB traffic before attributing a console failure to any particular difference.
 

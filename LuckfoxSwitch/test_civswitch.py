@@ -10,6 +10,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -78,6 +79,53 @@ class HIDTransportTests(unittest.TestCase):
                 time.sleep(0.001)
             led.assert_called_with(True)
         self.assertEqual(self.hosts['keyboard'].recv(64), civswitch.KBD_RELEASE)
+
+    def empty_host_output(self, interface):
+        """Linux f_hid read() returns zero for a completed zero-length OUT."""
+        real_read = os.read
+        received = threading.Event()
+
+        def read(fd, count):
+            output = real_read(fd, count)
+            if output == b'':
+                received.set()
+            return output
+
+        with patch.object(civswitch.os, 'read', side_effect=read):
+            self.hosts[interface].send(b'')
+            self.assertTrue(received.wait(0.5), 'Worker did not consume empty OUT packet')
+
+    def test_empty_keyboard_output_does_not_leave_f_held(self):
+        # A zero-length datagram models a USB packet, not stream EOF.
+        held_f = civswitch.pack_keyboard(keycode=9)
+        self.writer.send_keyboard(held_f)
+        self.receive_until('keyboard', held_f)
+        self.empty_host_output('keyboard')
+        next_key = civswitch.pack_keyboard(keycode=18)  # next letter in "for"
+        self.writer.send_keyboard(next_key)
+        self.receive_until('keyboard', next_key)
+        self.writer.send_keyboard(civswitch.KBD_RELEASE)
+        self.receive_until('keyboard', civswitch.KBD_RELEASE)
+
+    def test_empty_gamepad_output_does_not_stop_controller(self):
+        self.empty_host_output('pad')
+        self.writer.send_gamepad(civswitch.GAMEPAD_A)
+        self.receive_until('pad', civswitch.GAMEPAD_A)
+        self.writer.send_gamepad(civswitch.GAMEPAD_NEUTRAL)
+        self.receive_until('pad', civswitch.GAMEPAD_NEUTRAL)
+
+    def test_led_io_failure_does_not_stop_keyboard_reports(self):
+        attempted = threading.Event()
+
+        def failed_led_open(*args, **kwargs):
+            attempted.set()
+            raise OSError('Simulated LED sysfs I/O failure')
+
+        with patch('builtins.open', side_effect=failed_led_open):
+            self.hosts['keyboard'].send(b'\x02')
+            self.assertTrue(attempted.wait(0.5))
+            self.writer.send_keyboard(civswitch.KBD_RELEASE)
+            self.receive_until('keyboard', civswitch.KBD_RELEASE)
 
     def test_close_stops_report_workers(self):
         self.writer.close()
