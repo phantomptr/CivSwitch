@@ -27,6 +27,8 @@ Originally developed on the Luckfox Pico Pro. On 2026-11-04, the onboard-flash i
 
 ## Quick Start
 
+**Starting with a Luckfox Pico Pro that needs flashing?** Follow the [complete onboard-flash guide](FLASHING.md) first. It covers firmware/tool downloads, BOOT/Maskrom, backup, flashing, ADB checks, installation, and moving USB to the Switch without an SD card.
+
 ### 1. Download or generate the payload
 
 **From Releases (easiest):**  
@@ -141,15 +143,7 @@ Run from the repository root. Tests use actual local socket I/O to verify contin
 
 ### Luckfox Pico Pro: onboard flash without an SD card
 
-Use Luckfox's [official image downloads](https://wiki.luckfox.com/Luckfox-Pico-RV1106/Getting-Started/overview) and [flashing instructions](https://wiki.luckfox.com/Luckfox-Pico-RV1106/Getting-Started/Image-flashing/). Flashing replaces the existing NAND system. The setup tested here used `Luckfox_Pico_Pro_Max_Flash_250607/update.img` and macOS `upgrade_tool` v2.44. Its firmware SHA-256 was `1ebd461a574e6e644a42c3be211aa111df133310f9ebb2e918c1652a45fd4ff6`.
-
-1. Remove the SD card. Hold **BOOT** while connecting USB to the computer, then release it. `upgrade_tool LD` should show Maskrom.
-2. If preserving the old installation, load the matching `download.bin` into RAM with `upgrade_tool DB download.bin`, read flash geometry with `upgrade_tool RFI`, and back up the reported sectors with `upgrade_tool RL 0 <sector-count> nand-lba.img`. The tested unit reported `0x7fc00` sectors. Keep the backup private; it can contain device configuration and credentials.
-3. Flash the matching official image: `upgrade_tool UF update.img` (Luckfox documents running the tool with `sudo` if needed). Wait for `Upgrade firmware ok.` and for ADB to return after boot.
-4. Install using the ADB commands above. The tested stock image included Python 3.11.6, Bash, BusyBox init, and HID configfs support. `/proc/cmdline` contained `root=ubi0:rootfs`, confirming NAND boot.
-5. Prepare Switch chat, select a boot mode, run `sync`, and move USB as described above. **BOOT is only for flashing; leave it released for normal use.**
-
-No computer connection is required while running on the Switch. If already armed, reconnecting USB to a computer starts typing again. To disable it, use Ethernet/serial access to set the mode to `off` and stop the service; USB networking and ADB are unavailable while the HID gadget is active. Holding BOOT during a computer connection enters recovery without running the macro, but does not itself clear the saved boot mode.
+Follow the [step-by-step flashing and installation guide](FLASHING.md). It includes the tested firmware version and checksum, optional NAND backup commands, boot verification, and recovery. **BOOT is only for flashing; leave it released for normal use.** No computer connection is required while running on the Switch.
 
 ### Raspberry Pi Zero
 

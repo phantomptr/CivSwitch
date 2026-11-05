@@ -28,7 +28,7 @@ Hold BOOTSEL, plug the Pico into your PC, drag the UF2 onto the drive. Done.
 Download `LuckfoxSwitch.tar.gz` from [Releases](../../releases).  
 Copy to the board and install — see [LuckfoxSwitch/README.md](LuckfoxSwitch/README.md) for details.
 
-The **Luckfox Pico Pro can run entirely from its onboard flash**, without an SD card or a connected computer. See the [onboard-flash setup](LuckfoxSwitch/README.md#luckfox-pico-pro-onboard-flash-without-an-sd-card), including the observed restart behavior when using `poweroff` and how to move the board to the Switch after enabling automatic typing.
+The **Luckfox Pico Pro can run entirely from its onboard flash**, without an SD card or a connected computer. Follow the [complete Luckfox Pico Pro flashing guide](LuckfoxSwitch/FLASHING.md) for firmware downloads, backup, flashing, installation, and standalone startup, including the observed restart behavior when using `poweroff`.
 
 ### 2. Prepare the Switch
 
