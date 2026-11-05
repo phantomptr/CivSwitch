@@ -8,10 +8,10 @@
 #   - Orange Pi Zero / i96
 #   - Any board with a USB OTG/peripheral port
 #
-# The script auto-detects whether an existing gadget needs to be reconfigured
-# (e.g. Luckfox's rockchip RNDIS+ADB gadget) or a fresh gadget should be
-# created. It uses the Hori Pro Controller identity (VID=0x0F0D, PID=0x0092)
-# so the Switch recognizes it.
+# On Luckfox, the script reconfigures the existing rockchip gadget because that
+# is the enumeration path verified against the physical Switch. It uses the
+# Hori Pro Controller identity (VID=0x0F0D, PID=0x0092) so the Switch
+# recognizes it.
 #
 # WARNING: This replaces any existing USB gadget (ADB, RNDIS, ECM, etc.).
 # You will lose USB networking and ADB while in CivSwitch mode.
@@ -32,29 +32,88 @@ modprobe configfs 2>/dev/null || true
 modprobe libcomposite 2>/dev/null || true
 modprobe usb_f_hid 2>/dev/null || true
 
-# Check for an existing gadget to reconfigure (e.g. Luckfox's "rockchip")
-EXISTING=$(ls "$CONFIGFS" 2>/dev/null | head -1)
+UDC=$(ls /sys/class/udc/ 2>/dev/null | head -1)
+if [ -z "$UDC" ]; then
+    echo "ERROR: No UDC found. Is USB OTG/peripheral mode enabled?" >&2
+    exit 1
+fi
 
-if [ -n "$EXISTING" ]; then
-    GADGET="$CONFIGFS/$EXISTING"
-    echo "CivSwitch: reconfiguring existing gadget '$EXISTING'..."
+# The Switch reissues SET_CONFIGURATION while its controller view initializes.
+# Rockchip's Android configfs uevent path logs each request. At 100+ events per
+# second, serial console output consumed almost the entire CPU. Suppress only
+# the console log level for the duration of CivSwitch; restore-default-gadget
+# restores the saved value.
+PRINTK_STATE=/run/civswitch.printk
+if [ ! -f "$PRINTK_STATE" ]; then
+    cat /proc/sys/kernel/printk > "$PRINTK_STATE"
+fi
+dmesg -n 1
 
-    # Unbind from UDC
-    if [ -f "$GADGET/UDC" ] && [ -n "$(cat "$GADGET/UDC" 2>/dev/null)" ]; then
-        echo "" > "$GADGET/UDC"
-        sleep 0.3
+# Luckfox's Android USB helper responds to every CONFIGURED uevent. On the
+# physical Switch that handler ran every ~8 ms, repeatedly launching
+# /usr/bin/usbdevice until Linux memory was exhausted. CivSwitch owns the
+# controller directly, so stop the vendor agent before binding our gadget.
+if [ "${CIVSWITCH_STOP_VENDOR_USB:-1}" = 1 ]; then
+    # The stock S99usb0config loop and the android_usb udev helper both react
+    # to USB_STATE=DISCONNECTED and can restart RNDIS+ADB after CivSwitch has
+    # claimed the UDC. Keep the marker read by usbdevice, and stop the loop
+    # before stopping the vendor gadget.
+    if [ -f /tmp/.usb_config ]; then
+        grep -qx 'USB_FORCE_CHANGED' /tmp/.usb_config 2>/dev/null || \
+            echo USB_FORCE_CHANGED >> /tmp/.usb_config
+    else
+        echo USB_FORCE_CHANGED > /tmp/.usb_config
     fi
-
-    # Remove existing function symlinks from config
-    for link in "$GADGET"/configs/b.1/*; do
-        [ -L "$link" ] && rm -f "$link"
+    for pid in $(ps w | awk '/[S]99usb0config/ {print $1}'); do
+        kill "$pid" 2>/dev/null || true
     done
+    if [ -x /etc/init.d/S50usbdevice ]; then
+        /etc/init.d/S50usbdevice stop >/dev/null 2>&1 || true
+    fi
+    for process in usbdevice adbd; do
+        for pid in $(pidof "$process" 2>/dev/null || true); do
+            kill "$pid" 2>/dev/null || true
+        done
+    done
+fi
+
+# A UDC can be owned by only one gadget. Unbind any vendor gadget, but leave
+# its configfs tree intact so the default RNDIS+ADB mode can be restored.
+for gadget_udc in "$CONFIGFS"/*/UDC; do
+    [ -f "$gadget_udc" ] || continue
+    if [ "$(cat "$gadget_udc" 2>/dev/null || true)" = "$UDC" ]; then
+        echo "" > "$gadget_udc"
+    fi
+done
+sleep 0.3
+
+if [ -d "$CONFIGFS/rockchip" ]; then
+    GADGET="$CONFIGFS/rockchip"
+    echo "CivSwitch: reconfiguring existing gadget 'rockchip'..."
 else
     GADGET="$CONFIGFS/$GADGET_NAME"
-    echo "CivSwitch: creating new gadget '$GADGET_NAME'..."
-    mkdir -p "$GADGET"
-    mkdir -p "$GADGET/configs/b.1"
+    echo "CivSwitch: creating gadget '$GADGET_NAME'..."
 fi
+mkdir -p "$GADGET/configs/b.1"
+
+# Remove every stale function link from the gadget we are about to bind.
+for link in "$GADGET"/configs/*/*; do
+    [ -L "$link" ] && rm -f "$link"
+done
+
+# f_hid assigns /dev/hidgN IDs in function-creation order. Release every stale
+# HID function, including ones left by an older CivSwitch run or by the vendor
+# gadget, so the gamepad and keyboard deterministically become hidg0/hidg1.
+for link in "$CONFIGFS"/*/configs/*/*; do
+    [ -L "$link" ] || continue
+    case "$(readlink "$link" 2>/dev/null || true)" in
+        */functions/hid.usb*) rm -f "$link" ;;
+    esac
+done
+for hid_function in "$CONFIGFS"/*/functions/hid.usb*; do
+    [ -d "$hid_function" ] || continue
+    rmdir "$hid_function"
+done
 
 # --- Reconfigure device descriptor (Hori Pro Controller) ---
 echo 0x0200 > "$GADGET/bcdUSB"
@@ -102,7 +161,7 @@ echo 0 > "$HID0/protocol"
 echo 0 > "$HID0/subclass"
 # f_hid uses report_length as the endpoint's wMaxPacketSize too. Pico's
 # gamepad endpoints allow 64-byte packets, although normal input is 8 bytes.
-# This also permits echoing host output packets without truncating them.
+# This also permits echoing host output reports without truncating them.
 echo 64 > "$HID0/report_length"
 
 # Gamepad report descriptor (86 bytes — matches switch_usb_report_descriptor)
@@ -145,11 +204,25 @@ ln -sf "$HID1"  "$GADGET/configs/b.1/f2"
 echo "CivSwitch HID" > "$CFG_STRINGS/configuration"
 
 # --- Bind to UDC ---
-UDC=$(ls /sys/class/udc/ | head -1)
-if [ -z "$UDC" ]; then
-    echo "ERROR: No UDC found. Is USB OTG/peripheral mode enabled?" >&2
-    exit 1
-fi
 echo "$UDC" > "$GADGET/UDC"
 
-echo "CivSwitch: gadget ready — gamepad=/dev/hidg0 keyboard=/dev/hidg1"
+tries=0
+while [ ! -c /dev/hidg0 ] || [ ! -c /dev/hidg1 ]; do
+    tries=$((tries + 1))
+    [ "$tries" -lt 20 ] || {
+        echo "ERROR: expected /dev/hidg0 and /dev/hidg1 after binding" >&2
+        ls -l /dev/hidg* 2>&1 || true
+        exit 1
+    }
+    sleep 0.1
+done
+
+# HID character nodes are supplied by devtmpfs; udev is not required to create
+# them. Stop the udev event queue only after both nodes exist so the same
+# repeated uevents do not spawn vendor helpers or consume userspace CPU.
+if [ -x /etc/init.d/S10udev ]; then
+    /etc/init.d/S10udev stop >/dev/null 2>&1 || true
+fi
+
+SPEED=$(cat "/sys/class/udc/$UDC/current_speed" 2>/dev/null || echo unknown)
+echo "CivSwitch: gadget ready — gamepad=/dev/hidg0 keyboard=/dev/hidg1 speed=$SPEED"

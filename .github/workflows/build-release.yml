@@ -29,14 +29,15 @@ jobs:
       - name: Verify Luckfox transport and Pico macro parity
         run: |
           python3 -B -m unittest discover -s LuckfoxSwitch -p 'test_*.py' -v
+          python3 -m py_compile LuckfoxSwitch/make_boot_env.py LuckfoxSwitch/make_sd_swap_assets.py
           bash -n LuckfoxSwitch/usb-gadget-hid.sh LuckfoxSwitch/install.sh LuckfoxSwitch/restore-default-gadget.sh LuckfoxSwitch/run-on-boot.sh
-          sh -n LuckfoxSwitch/S99zz-civswitch
+          sh -n LuckfoxSwitch/S99zz-civswitch LuckfoxSwitch/civswitchctl LuckfoxSwitch/luckfox-ssh-connect
 
       # --- Pico SDK ---
       - name: Install ARM toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib
+          sudo apt-get install -y cmake ninja-build gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib util-linux
 
       - name: Clone Pico SDK
         run: |
@@ -68,6 +69,8 @@ jobs:
           cp PicoSwitch/payload.txt LuckfoxSwitch/payload.txt
           tar czf LuckfoxSwitch.tar.gz -C LuckfoxSwitch .
           cd LuckfoxSwitch && zip -r ../LuckfoxSwitch.zip . && cd ..
+          python3 LuckfoxSwitch/make_sd_swap_assets.py --output-dir /tmp/civswap-assets
+          tar czf CIVSWAP-assets.tar.gz -C /tmp/civswap-assets .
 
       # --- Upload artifacts (available on every run) ---
       - uses: actions/upload-artifact@v4
@@ -85,6 +88,11 @@ jobs:
           name: LuckfoxSwitch
           path: LuckfoxSwitch.tar.gz
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CIVSWAP-assets
+          path: CIVSWAP-assets.tar.gz
+
       # --- Create GitHub Release on tag push ---
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
@@ -96,3 +104,4 @@ jobs:
             PicoSwitch/build-pico1/src/civ7-pico1.uf2
             LuckfoxSwitch.tar.gz
             LuckfoxSwitch.zip
+            CIVSWAP-assets.tar.gz

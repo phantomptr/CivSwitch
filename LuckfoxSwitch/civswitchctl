@@ -1,0 +1,210 @@
+#!/bin/sh
+# Manual CivSwitch controller for a Luckfox Pico Pro.
+#
+# Nothing is armed at boot. The stock RNDIS+ADB USB gadget remains available
+# until one of the start commands explicitly replaces it with the HID gadget.
+set -eu
+
+ROOT=${CIVSWITCH_ROOT:-/opt/civswitch}
+PIDFILE=${CIVSWITCH_PIDFILE:-/run/civswitch.pid}
+CHILD_PIDFILE=${CIVSWITCH_CHILD_PIDFILE:-/run/civswitch-child.pid}
+JOB="$ROOT/run-on-boot.sh"
+RESTORE="$ROOT/restore-default-gadget.sh"
+LOG="$ROOT/logs/current.log"
+
+usage() {
+    cat <<EOF
+Usage: civswitchctl <command>
+
+  start              run the full 87-line payload
+  start-line N       type only payload line N, then restore stock USB
+  test               send uncounted R, then A, B, X, Y, L; keep HID active
+  stop               stop the current job and restore stock USB
+  status             show job state, memory, USB state, and recent log
+  restore            explicitly restore RNDIS+ADB
+
+Run this over the Ethernet SSH alias:
+  ssh yunpengs-luckfox
+EOF
+}
+
+process_alive() {
+    _civswitch_pid=$1
+    case "$_civswitch_pid" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    [ -r "/proc/$_civswitch_pid/stat" ] || return 1
+    _civswitch_state=$(awk '{print $3}' \
+        "/proc/$_civswitch_pid/stat" 2>/dev/null || true)
+    [ -n "$_civswitch_state" ] && [ "$_civswitch_state" != Z ] || return 1
+    kill -0 "$_civswitch_pid" 2>/dev/null
+}
+
+running() {
+    [ -s "$PIDFILE" ] || return 1
+    process_alive "$(cat "$PIDFILE" 2>/dev/null || true)"
+}
+
+stop_job() {
+    if running; then
+        pid=$(cat "$PIDFILE")
+        if [ -s "$CHILD_PIDFILE" ]; then
+            child_pid=$(cat "$CHILD_PIDFILE" 2>/dev/null || true)
+            if process_alive "$child_pid"; then
+                kill -TERM "$child_pid" 2>/dev/null || true
+            fi
+        fi
+        kill -TERM "$pid" 2>/dev/null || true
+        ticks=0
+        # Restoring RNDIS+ADB restarts udev and the vendor USB service. Give
+        # the job runner enough time to finish that work before forcing it;
+        # a short timeout starts a second restore concurrently and can leave
+        # USB gadget nodes in a device-busy state.
+        while process_alive "$pid" && [ "$ticks" -lt 450 ]; do
+            sleep 0.1 2>/dev/null || sleep 1
+            ticks=$((ticks + 1))
+        done
+        if process_alive "$pid"; then
+            echo "CivSwitch: forcing PID $pid to stop"
+            if [ -s "$CHILD_PIDFILE" ]; then
+                child_pid=$(cat "$CHILD_PIDFILE" 2>/dev/null || true)
+                if process_alive "$child_pid"; then
+                    kill -KILL "$child_pid" 2>/dev/null || true
+                fi
+            fi
+            kill -KILL "$pid" 2>/dev/null || true
+            rm -f "$PIDFILE"
+            rm -f "$CHILD_PIDFILE"
+            return 1
+        fi
+        rm -f "$PIDFILE"
+        rm -f "$CHILD_PIDFILE"
+        return 0
+    fi
+    rm -f "$PIDFILE"
+    rm -f "$CHILD_PIDFILE"
+    return 1
+}
+
+start_job() {
+    mode=$1
+    if running; then
+        echo "CivSwitch is already running as PID $(cat "$PIDFILE")" >&2
+        exit 1
+    fi
+    [ -x "$JOB" ] || {
+        echo "Missing job runner: $JOB" >&2
+        exit 1
+    }
+
+    # Never arm a future boot as a side effect of a manual run.
+    echo off > /etc/civswitch-mode 2>/dev/null || true
+    rm -f "$PIDFILE"
+    [ -x "$ROOT/setup-swap.sh" ] && "$ROOT/setup-swap.sh" || true
+
+    if command -v start-stop-daemon >/dev/null 2>&1; then
+        start-stop-daemon -S -b -m -p "$PIDFILE" -x "$JOB" -- "$mode"
+    else
+        nohup "$JOB" "$mode" >/dev/null 2>&1 &
+        echo "$!" > "$PIDFILE"
+    fi
+
+    sleep 0.2
+    if ! running; then
+        echo "CivSwitch failed to stay running; inspect $LOG" >&2
+        [ -r "$LOG" ] && tail -n 20 "$LOG" >&2
+        exit 1
+    fi
+    echo "CivSwitch started: mode=$mode PID=$(cat "$PIDFILE")"
+    echo "Follow with: tail -f $LOG"
+}
+
+show_status() {
+    if running; then
+        echo "Job:       running (PID $(cat "$PIDFILE"))"
+    else
+        echo "Job:       idle"
+    fi
+    printf 'Boot mode: %s\n' "$(cat /etc/civswitch-mode 2>/dev/null || echo unknown)"
+    printf 'HID:       '
+    if [ -e /dev/hidg0 ] && [ -e /dev/hidg1 ]; then
+        echo "present"
+    else
+        echo "not bound"
+    fi
+    printf 'USB UDC:   '
+    found=0
+    for state in /sys/class/udc/*/state; do
+        [ -r "$state" ] || continue
+        printf '%s=%s ' "$(basename "$(dirname "$state")")" "$(cat "$state")"
+        found=1
+    done
+    [ "$found" = 1 ] || printf 'none'
+    echo
+    printf 'Ethernet:  '
+    ifconfig eth0 2>/dev/null | grep -E 'inet |UP ' | tr '\n' ' ' || printf 'unavailable'
+    echo
+    printf 'USB net:   '
+    ifconfig usb0 2>/dev/null | grep -E 'inet |UP ' | tr '\n' ' ' || printf 'unavailable'
+    echo
+    echo "Memory:"
+    grep -E '^(MemTotal|MemFree|MemAvailable|SwapTotal|SwapFree):' /proc/meminfo 2>/dev/null || true
+    echo "Swap:"
+    grep '^/dev/' /proc/swaps 2>/dev/null || echo "  none"
+    if [ -r "$LOG" ]; then
+        echo "Recent log:"
+        tail -n 20 "$LOG"
+    fi
+}
+
+case "${1:-}" in
+    start)
+        [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+        start_job payload
+        ;;
+    start-line)
+        [ "$#" -eq 2 ] || { usage >&2; exit 2; }
+        case "$2" in
+            ''|*[!0-9]*|0) echo "Line number must be a positive integer." >&2; exit 2 ;;
+        esac
+        start_job "line:$2"
+        ;;
+    test)
+        [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+        start_job controller-test
+        ;;
+    stop)
+        [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+        if stop_job; then
+            # The runner's EXIT trap performs the one authoritative restore.
+            echo "CivSwitch stopped; stock USB restored by the job runner."
+        else
+            # No live runner could perform cleanup, so recover explicitly.
+            if [ -x "$RESTORE" ]; then
+                "$RESTORE" --from-job
+            fi
+            echo "CivSwitch stopped; stock USB recovery completed."
+        fi
+        ;;
+    status)
+        [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+        show_status
+        ;;
+    restore)
+        [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+        if [ -x "$RESTORE" ]; then
+            "$RESTORE"
+        else
+            stop_job
+            echo "Missing restore helper: $RESTORE" >&2
+            exit 1
+        fi
+        ;;
+    -h|--help|help|'')
+        usage
+        ;;
+    *)
+        usage >&2
+        exit 2
+        ;;
+esac

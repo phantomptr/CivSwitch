@@ -4,3 +4,6 @@ build-pico2/
 *.uf2
 package-lock.json
 payload.txt
+__pycache__/
+*.pyc
+sd-swap-assets/

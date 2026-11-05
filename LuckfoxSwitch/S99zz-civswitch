@@ -8,6 +8,7 @@ case "${1:-}" in
         if [ -r "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
             exit 0
         fi
+        [ -x /opt/civswitch/setup-swap.sh ] && /opt/civswitch/setup-swap.sh || true
         mode=$(cat "$MODEFILE" 2>/dev/null || echo off)
         case "$mode" in
             off) exit 0 ;;
@@ -18,7 +19,7 @@ case "${1:-}" in
             -x /opt/civswitch/run-on-boot.sh -- "$mode"
         ;;
     stop)
-        start-stop-daemon -K -p "$PIDFILE" -s TERM 2>/dev/null || true
+        start-stop-daemon -K -p "$PIDFILE" -s TERM >/dev/null 2>&1 || true
         rm -f "$PIDFILE"
         ;;
     restart) "$0" stop; "$0" start ;;

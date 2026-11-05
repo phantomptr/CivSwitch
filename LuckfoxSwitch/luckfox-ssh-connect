@@ -1,0 +1,85 @@
+#!/bin/sh
+# SSH ProxyCommand for the single `yunpengs-luckfox` host alias.
+#
+# Transport order is Ethernet -> USB RNDIS -> ADB. All paths reach the same
+# board, so callers never need separate -eth, -usb, or -adb SSH aliases.
+set -eu
+
+PATH="/opt/homebrew/bin:$HOME/Library/Android/sdk/platform-tools:$PATH"
+export PATH
+
+MODE="${1:-auto}"
+ETHERNET=192.168.86.198
+USB_BOARD=192.168.77.1
+ADB_PORT=2222
+
+eth_up() {
+    nc -z -w 1 "$ETHERNET" 22 2>/dev/null
+}
+
+usb_up() {
+    nc -z -w 1 "$USB_BOARD" 22 2>/dev/null
+}
+
+# Other ADB devices may be attached. The Luckfox vendor image reports a
+# placeholder model to adb, so ask each device tree for its real model.
+adb_up() {
+    command -v adb >/dev/null 2>&1 || return 1
+    for serial in $(adb devices </dev/null 2>/dev/null |
+            awk '$2 == "device" {print $1}'); do
+        if adb -s "$serial" shell cat /proc/device-tree/model \
+                </dev/null 2>/dev/null | grep -q Luckfox; then
+            export ANDROID_SERIAL="$serial"
+            return 0
+        fi
+    done
+    return 1
+}
+
+connect_eth() {
+    exec nc "$ETHERNET" 22
+}
+
+connect_usb() {
+    exec nc "$USB_BOARD" 22
+}
+
+connect_adb() {
+    adb forward "tcp:$ADB_PORT" tcp:22 </dev/null >/dev/null 2>&1 || true
+    exec nc localhost "$ADB_PORT"
+}
+
+case "$MODE" in
+    eth)
+        eth_up || {
+            echo "luckfox: Ethernet ($ETHERNET) unreachable" >&2
+            exit 1
+        }
+        connect_eth
+        ;;
+    usb)
+        usb_up || {
+            echo "luckfox: USB ($USB_BOARD) unreachable on $(hostname -s)" >&2
+            exit 1
+        }
+        connect_usb
+        ;;
+    adb)
+        adb_up || {
+            echo "luckfox: no Luckfox ADB device on $(hostname -s)" >&2
+            exit 1
+        }
+        connect_adb
+        ;;
+    auto)
+        eth_up && connect_eth
+        usb_up && connect_usb
+        adb_up && connect_adb
+        echo "luckfox: unreachable by Ethernet ($ETHERNET), USB ($USB_BOARD), or ADB" >&2
+        exit 1
+        ;;
+    *)
+        echo "usage: $0 [auto|eth|usb|adb]" >&2
+        exit 2
+        ;;
+esac

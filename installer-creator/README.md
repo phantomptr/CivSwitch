@@ -15,7 +15,7 @@ python install.py <console-ip> [port] [payload.js]
 - `[port]`        optional, default 9026 (the Remote JS Loader port)
 - `[payload.js]`  optional, default `../core.js` (the shared payload at the repo root) - the shipped default is the Remote JS Loader: after reboot, Load Game brings the loader up at boot.
 
-Everything else is automatic: the payload is wrapped and compressed (terser -> deflate -> inflate-stage, with an offline round-trip check), the save template is uploaded to the loader in chunked connections (~4, a few seconds), then an apply payload locates the `currentTurnDate` record in the template by field hash, splices the compressed stage into it, wipes every file in `save:/saves/Single/`, writes `save:/saves/Single/XSTRIG.Civ7Save`, and commits.
+Everything else is automatic: the payload is wrapped and compressed (terser -> deflate -> inflate-stage, with an offline round-trip check), the save template is uploaded to the loader in chunked connections (~4, a few seconds), then an apply payload locates the `currentTurnDate` record in the template by field hash, splices the compressed stage into it, replaces only `save:/saves/Single/XSTRIG.Civ7Save`, and commits. Other saves in `save:/saves/Single/` are left untouched.
 Exit code 0 only on `INSTALL DONE`.
 
 After install: reboot the game, main menu -> **Load Game** -> the list builds -> the stager fires -> hex decode -> eval(stage) -> inflate -> your payload runs, every boot.

@@ -6,6 +6,8 @@ Only the **1.0.0** version of the game on physical cartridge is supported.
 Compatible with Switch 1/2 firmware 20.x.x through current (23.0.1).  
 Tested on Switch 1 fw 22.5.0, Switch 2 fw 20.4.0 and 23.0.1.
 
+The Luckfox Pico Pro path is now verified end-to-end on **Switch 2**: the full 87/87 payload completed, the Remote JS Loader came up on port 9026, and the persistent `XSTRIG.Civ7Save` installer completed. The run kept about 96 MB available and did not need swap. See [LuckfoxSwitch/README.md](LuckfoxSwitch/README.md) for the tested setup and operating limits.
+
 ## Components
 
 | Component | Description |
@@ -25,10 +27,9 @@ Download `civ7-pico1.uf2` (RP2040) or `civ7-pico2.uf2` (RP2350) from [Releases](
 Hold BOOTSEL, plug the Pico into your PC, drag the UF2 onto the drive. Done.
 
 **Option B — Linux SBC (Luckfox Pico, Pi Zero, BeagleBone, etc.)**  
-Download `LuckfoxSwitch.tar.gz` from [Releases](../../releases).  
-Copy to the board and install — see [LuckfoxSwitch/README.md](LuckfoxSwitch/README.md) for details.
+Download `LuckfoxSwitch.tar.gz` from [Releases](../../releases), copy it to the board, and run `bash install.sh` inside the extracted directory. For a Luckfox Pico Pro, follow the [complete Luckfox Pico Pro flashing guide](LuckfoxSwitch/FLASHING.md); it includes the required Buildroot image, `rk_dma_heap_cma=4K` environment, static networking, the single `yunpengs-luckfox` SSH alias, manual controller test, and the verified full-run procedure.
 
-The **Luckfox Pico Pro can run entirely from its onboard flash**, without an SD card or a connected computer. Follow the [complete Luckfox Pico Pro flashing guide](LuckfoxSwitch/FLASHING.md) for firmware downloads, backup, flashing, installation, and standalone startup, including the observed restart behavior when using `poweroff`.
+The Luckfox Pico Pro runs from onboard SPI NAND with no SD card or continuing computer connection. CivSwitch is manual by default: nothing types at boot until `civswitchctl start`, `start-line N`, or `test` is invoked.
 
 ### 2. Prepare the Switch
 
@@ -55,6 +56,8 @@ python installer-creator/install.py <console-ip>
 This uploads a save file with the compressed payload. From then on: **main menu → Load Game** runs the payload automatically (and if it's the loader, port 9026 is up at boot and survives sleep/wake).
 
 You can revert system language after the installer finishes.
+
+The trigger is a normal Civ VII save. Nintendo Switch Online Save Data Cloud can back it up or download it to another console when cloud support is enabled for that game; an NSO membership is required for Nintendo cloud saves. Disable per-game automatic cloud backup/download if you want the trigger isolated to one console. 2K Cross-Save is separate and generally requires explicitly selecting cross-play saves.
 
 ## Sending payloads
 
@@ -94,8 +97,10 @@ cp payload.txt ../LuckfoxSwitch/
 
 scp -r LuckfoxSwitch/ root@<board-ip>:/tmp/
 ssh root@<board-ip> 'cd /tmp/LuckfoxSwitch && bash install.sh'
-ssh root@<board-ip> 'systemctl enable civswitch-gadget civswitch && reboot'
+ssh root@<board-ip> 'civswitchctl status'
 ```
+
+Luckfox manual operation is intentional. The installer leaves automatic typing off; `civswitchctl test`, `start-line N`, and `start` explicitly replace the stock RNDIS+ADB gadget while a job is active, and `civswitchctl stop` restores it. See the [Luckfox flashing guide](LuckfoxSwitch/FLASHING.md) for the exact Switch 2 configuration and host SSH helper.
 
 ## Credits
 

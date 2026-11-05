@@ -4,8 +4,8 @@
 Builds the installer in a temp directory and sends it to the console's
 Remote JS Loader automatically: compresses the payload, splices it into
 the bundled save template, uploads the template as chunked connections,
-then writes the persistent XSTRIG.Civ7Save trigger (cleaning up any
-previously installed trigger files first).
+then writes the persistent XSTRIG.Civ7Save trigger (replacing only a
+previously installed trigger file).
 
 Usage:
   python install.py <console-ip> [port] [payload.js]
@@ -45,46 +45,18 @@ const F_SetFileSize = sdk_base + 0xa6020n;
 const F_Commit      = sdk_base + 0xa7de0n;
 const F_DeleteFile  = sdk_base + 0xa6710n;
 const F_CreateDir   = sdk_base + 0xa6890n;
-const F_OpenDir     = sdk_base + 0xa7bb0n;
-const F_ReadDir     = sdk_base + 0xa5840n;
-const F_CloseDir    = sdk_base + 0xa57b0n;
 
 const STAGER = __STAGER__;
 const STAGE_HEX = __STAGE_HEX__;
 const TPL_B64_LEN = __TPL_B64_LEN__;
 
-const sfx_h = malloc(8), sfx_sz = malloc(8);
+const sfx_h = malloc(8);
 const sfx_wo = malloc(8); write32(sfx_wo, 1n);
-const sfx_dh = malloc(8), sfx_dn = malloc(8);
 const sfx_pb = malloc(4096);
-const sfx_dirbuf = malloc(0x310 * 32);
 
 function sfx_writePath(bytes) {
     for (let i = 0; i < bytes.length; i++) write8(sfx_pb + BigInt(i), BigInt(bytes[i]));
     write8(sfx_pb + BigInt(bytes.length), 0n);
-}
-function sfx_listDir(path) {
-    sfx_writePath(text_encode(path));
-    if (call_rop(F_OpenDir, sfx_dh, sfx_pb, 3n) !== 0n) return null;
-    const out = [];
-    for (;;) {
-        call_rop(F_ReadDir, sfx_dn, sfx_dirbuf, read64(sfx_dh), 32n);
-        const n = Number(read64(sfx_dn));
-        if (n <= 0) break;
-        for (let i = 0; i < n; i++) {
-            const e = sfx_dirbuf + BigInt(i * 0x310);
-            let nm = "";
-            for (let k = 0; k < 0x300; k++) {
-                const c = Number(read8(e + BigInt(k)));
-                if (!c) break;
-                nm += String.fromCharCode(c);
-            }
-            out.push({ name: nm, type: Number(read32(e + 0x304n) & 0xffn) });
-        }
-        if (n < 32 || out.length >= 512) break;
-    }
-    call_rop(F_CloseDir, read64(sfx_dh));
-    return out;
 }
 function sfx_b64dec(s) {
     const A = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -117,16 +89,6 @@ const tpl = sfx_b64dec(tplB64);
 if (tpl[0] !== 0x43 || tpl[1] !== 0x49 || tpl[2] !== 0x56 || tpl[3] !== 0x37) {
     await log("E: template bad magic");
     return;
-}
-
-const sub = sfx_listDir("save:/saves/Single/");
-if (sub) {
-    for (let j = 0; j < sub.length; j++) {
-        if (sub[j].type !== 1) continue;
-        const nm = sub[j].name;
-        sfx_writePath(text_encode("save:/saves/Single/" + nm));
-        call_rop(F_DeleteFile, sfx_pb);
-    }
 }
 
 // find the currentTurnDate record by its field hash (FE5A61E8):
@@ -164,6 +126,7 @@ sfx_writePath(text_encode("save:/saves/Single"));
 call_rop(F_CreateDir, sfx_pb);
 
 sfx_writePath(text_encode("save:/saves/Single/XSTRIG.Civ7Save"));
+call_rop(F_DeleteFile, sfx_pb);
 call_rop(F_CreateFile, sfx_pb, BigInt(newSize));
 const r2 = call_rop(F_OpenFile, sfx_h, sfx_pb, 6n);
 if (r2 !== 0n) { await log("E: open XSTRIG " + toHex(r2)); return; }
