@@ -67,7 +67,7 @@ jobs:
       - name: Package LuckfoxSwitch
         run: |
           cp PicoSwitch/payload.txt LuckfoxSwitch/payload.txt
-          tar --exclude='__pycache__' --exclude='*.pyc' czf LuckfoxSwitch.tar.gz -C LuckfoxSwitch .
+          tar -czf LuckfoxSwitch.tar.gz --exclude='__pycache__' --exclude='*.pyc' -C LuckfoxSwitch .
           cd LuckfoxSwitch && zip -r ../LuckfoxSwitch.zip . -x '*/__pycache__/*' '__pycache__/*' '*.pyc' && cd ..
           python3 LuckfoxSwitch/make_sd_swap_assets.py --output-dir /tmp/civswap-assets
           tar czf CIVSWAP-assets.tar.gz -C /tmp/civswap-assets .
