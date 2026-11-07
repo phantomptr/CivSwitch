@@ -74,7 +74,7 @@ else
     # Installing never arms payload typing. Explicitly select a mode later.
     echo off > /etc/civswitch-mode
     echo "Installed for BusyBox init; automatic typing is OFF."
-    echo "Manual control: civswitchctl {start|start-line N|test|stop|status}"
+    echo "Manual control: civswitchctl {prepare|press BUTTON|resume N|start|start-line N|test [BUTTON]|test-warmup [BUTTON]|test-preamble|keyboard|keyboard-alpha|chat-keyboard|raw-line N|stop|status}"
     echo "Run sync, then unplug USB from the computer and move it to the Switch."
     echo "Do not reboot or poweroff while connected to the computer: the board may restart."
     exit 0
@@ -86,7 +86,13 @@ echo ""
 echo "To run manually (replaces ADB with HID):"
 echo "  civswitchctl start              # full payload"
 echo "  civswitchctl start-line N       # one payload line"
-echo "  civswitchctl test               # R warm-up, then A/B/X/Y/L"
+echo "  civswitchctl test [BUTTON]      # one gamepad button; HID stays active"
+echo "  civswitchctl test-warmup [BUTTON] # R warm-up, then one gamepad button"
+echo "  civswitchctl test-preamble      # exact R warm-up plus five-A preamble"
+echo "  civswitchctl keyboard           # keyboard-only CivSwitch diagnostic"
+echo "  civswitchctl keyboard-alpha     # keyboard-only a-z diagnostic"
+echo "  civswitchctl chat-keyboard      # composite warm-up + Esc/A focus + CivSwitch1"
+echo "  civswitchctl raw-line N         # keyboard-only payload line N"
 echo "  civswitchctl stop               # restore RNDIS+ADB"
 echo "  civswitchctl status"
 echo ""

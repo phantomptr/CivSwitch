@@ -6,7 +6,7 @@ Only the **1.0.0** version of the game on physical cartridge is supported.
 Compatible with Switch 1/2 firmware 20.x.x through current (23.0.1).  
 Tested on Switch 1 fw 22.5.0, Switch 2 fw 20.4.0 and 23.0.1.
 
-The Luckfox Pico Pro / Max path is now verified end-to-end on **Switch 2** using a Pico Pro: the full 87/87 payload completed, the Remote JS Loader came up on port 9026, and the persistent `XSTRIG.Civ7Save` installer completed. The run kept about 96 MB available and did not need swap. Pro and Max share Luckfox's Pro/Max Buildroot image and board layout; Max has not been run separately. See [LuckfoxSwitch/README.md](LuckfoxSwitch/README.md) for the tested setup, hardware matrix, and operating limits.
+The **Luckfox Pico Pro** path is verified end-to-end on **Switch 1 and Switch 2**: 87/87 typed lines reached the Remote JS Loader on port 9026. Switch 1 also executed the hello-world payload successfully after the keyboard control-channel fix; the earlier Switch 2 run completed the persistent installer. Max shares the Pro/Max image but has not been tested separately. See the [Luckfox guide](LuckfoxSwitch/README.md) and [verified findings](LuckfoxSwitch/FINDINGS.md).
 
 ## Components
 
@@ -43,9 +43,10 @@ The verified Pro/Max family runs from onboard SPI NAND with no SD card or contin
 ### 3. Run the payload
 
 1. Launch Civ 7 → **MULTIPLAYER** → **WIRELESS** → **CREATE GAME** → **HOST LOBBY** → **CHAT**
-2. Plug the device into the Switch (docked mode: focus the chat box first)
-3. Wait ~15 minutes while it types all ~87 lines into chat
-4. The Remote JS Loader comes up on the console at TCP port 9026
+2. With the normal controller, **select/focus the chat text field first** so the caret is in the message box. Opening the chat panel alone is not enough.
+3. Put the Switch in **docked mode**, then plug in the Pico/Luckfox. CivSwitch sends its fixed `A × 5` preamble after enumeration; the chat task must already be active because it cannot navigate the game menu by itself.
+4. For Luckfox, follow the [registered-controller workflow](LuckfoxSwitch/README.md#registered-controller-workflow-switch-1-and-switch-2), including any L+R/A prompts. Wait about 20–25 minutes for all 87 lines.
+5. The Remote JS Loader comes up on the console at TCP port 9026
 
 ### 4. Install the persistent boot trigger
 

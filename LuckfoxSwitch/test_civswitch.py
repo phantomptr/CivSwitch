@@ -234,6 +234,22 @@ class HIDTransportTests(unittest.TestCase):
         self.assertEqual(state['last_queued'], civswitch.KBD_RELEASE.hex())
         self.assertEqual(state['queued_generation'], state['generation'])
 
+    def test_forced_reports_are_bounded_and_identical(self):
+        self.writer.send_keyboard(civswitch.KBD_RELEASE)
+        self.drain('keyboard')
+        initial_writes = self.writer.keyboard.snapshot()['writes']
+        key_down = civswitch.pack_keyboard(keycode=civswitch.HID_KEY_A)
+        self.writer.send_keyboard_repeated(key_down, 3, 0)
+        for _ in range(3):
+            self.receive_until('keyboard', key_down)
+        self.assert_no_report('keyboard')
+        self.assertEqual(self.writer.keyboard.snapshot()['writes'],
+                         initial_writes + 3)
+
+    def test_repeated_report_count_must_be_positive(self):
+        with self.assertRaisesRegex(ValueError, 'must be positive'):
+            self.writer.send_keyboard_repeated(civswitch.KBD_RELEASE, 0, 0)
+
     def test_missing_host_polling_becomes_a_bounded_transport_error(self):
         # The macro no longer waits on each transfer, so the worker owns the
         # liveness check. A disconnected or permanently suspended host must
@@ -299,6 +315,7 @@ class MacroParityTests(unittest.TestCase):
             pad = civswitch.GAMEPAD_NEUTRAL
             keyboard = civswitch.KBD_RELEASE
             press_a = civswitch.HIDWriter.press_a
+            press_button = civswitch.HIDWriter.press_button
             press_key = civswitch.HIDWriter.press_key
             type_line = civswitch.HIDWriter.type_line
 
@@ -331,6 +348,20 @@ class MacroParityTests(unittest.TestCase):
         return trace
 
     def normalize_linux_preamble(self, trace):
+        self.assertEqual(
+            trace[:3],
+            [
+                (round(civswitch.LINUX_USB_READY_DELAY_S * 1000),
+                 civswitch.GAMEPAD_NEUTRAL, civswitch.KBD_RELEASE),
+                (round(civswitch.CONTROLLER_WARMUP_HOLD_S * 1000),
+                 civswitch.pack_gamepad(buttons=civswitch.MASK_R),
+                 civswitch.KBD_RELEASE),
+                (round(civswitch.CONTROLLER_WARMUP_SETTLE_S * 1000),
+                 civswitch.GAMEPAD_NEUTRAL, civswitch.KBD_RELEASE),
+            ])
+        # The bounded Switch 1 first-state warm-up is intentionally Linux-only.
+        # Everything after it must retain Pico state and timing parity.
+        trace = [trace[0]] + trace[3:]
         linux_gap = round(civswitch.LINUX_PREAMBLE_GAP_S * 1000)
         pico_gap = round(civswitch.PREAMBLE_GAP_S * 1000)
         return [
@@ -417,7 +448,8 @@ class DescriptorParityTests(unittest.TestCase):
     def test_gamepad_uses_pico_compatible_interrupt_output(self):
         root = Path(__file__).resolve().parents[1]
         script = (root / 'LuckfoxSwitch/usb-gadget-hid.sh').read_text()
-        self.assertNotIn('no_out_endpoint', script)
+        self.assertNotIn('"$HID0/no_out_endpoint"', script)
+        self.assertIn('echo 1 > "$HID1/no_out_endpoint"', script)
         self.assertNotIn('CIVSWITCH_USB_SPEED', script)
 
     def test_luckfox_reuses_the_vendor_rockchip_gadget(self):
@@ -458,6 +490,42 @@ class DescriptorParityTests(unittest.TestCase):
 
 
 class StartupTests(unittest.TestCase):
+    def test_resume_keeps_original_line_numbers_and_skips_startup_buttons(self):
+        with tempfile.TemporaryDirectory() as directory:
+            payload = Path(directory) / 'payload.txt'
+            payload.write_text('first\nsecond\nthird\n')
+            with patch.object(civswitch, 'wait_for_usb'), \
+                    patch.object(civswitch, 'HIDWriter') as writer, \
+                    patch.object(civswitch.time, 'sleep'), \
+                    patch.object(civswitch, 'set_led'), \
+                    patch.object(civswitch, 'record_event') as record:
+                civswitch.run_macro(str(payload), start_line=2, skip_preamble=True)
+            self.assertEqual(writer.return_value.type_line.call_args_list,
+                             [call('second'), call('third')])
+            writer.return_value.press_button.assert_not_called()
+            self.assertEqual([x.kwargs['line'] for x in record.call_args_list
+                              if x.args[0] == 'line-complete'], [2, 3])
+            writer.return_value.close.assert_called_once()
+
+    def test_resume_rejects_invalid_line_before_opening_usb(self):
+        with tempfile.TemporaryDirectory() as directory:
+            payload = Path(directory) / 'payload.txt'
+            payload.write_text('first\n')
+            with patch.object(civswitch, 'wait_for_usb') as wait:
+                with self.assertRaises(ValueError):
+                    civswitch.run_macro(str(payload), start_line=2, skip_preamble=True)
+            wait.assert_not_called()
+
+    def test_bounded_controller_press_closes_without_waiting_or_typing(self):
+        with patch.object(civswitch, 'wait_for_usb'), \
+                patch.object(civswitch, 'HIDWriter') as writer, \
+                patch.object(civswitch.time, 'sleep'), \
+                patch.object(civswitch, 'record_event'):
+            civswitch.run_controller_test('A', keep_active=False)
+        writer.return_value.wait.assert_not_called()
+        writer.return_value.type_line.assert_not_called()
+        writer.return_value.close.assert_called_once()
+
     def test_memory_guard_rejects_a_line_when_headroom_is_too_low(self):
         with tempfile.TemporaryDirectory() as directory:
             meminfo = Path(directory) / 'meminfo'
@@ -537,6 +605,36 @@ class StartupTests(unittest.TestCase):
             writer.return_value.close.assert_called_once()
             self.assertEqual(reclaim.call_count, 2)
 
+    def test_macro_consumes_first_controller_state_with_one_bounded_warmup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            payload = Path(directory) / 'payload.txt'
+            payload.write_text('test\n')
+            with patch.object(civswitch, 'HIDWriter') as writer, \
+                    patch.object(civswitch, 'wait_for_usb'), \
+                    patch.object(civswitch.time, 'sleep') as sleep, \
+                    patch.object(civswitch, 'set_led'), \
+                    patch.object(civswitch, 'flush_diagnostics'), \
+                    patch.object(civswitch, 'ensure_memory_headroom',
+                                 return_value=100000), \
+                    patch.object(civswitch, 'reclaim_python_memory'):
+                writer.return_value.snapshot.return_value = {
+                    'typing_position': None}
+                civswitch.run_macro(str(payload))
+
+        writer.return_value.send_gamepad.assert_called_once_with(
+            civswitch.GAMEPAD_NEUTRAL)
+        writer.return_value.press_button.assert_called_once_with(
+            civswitch.MASK_R,
+            hold_s=civswitch.CONTROLLER_WARMUP_HOLD_S)
+        self.assertEqual(
+            writer.return_value.press_a.call_count,
+            civswitch.PREAMBLE_A_COUNT + 1)
+        self.assertEqual(
+            sleep.call_args_list[:3],
+            [call(civswitch.LINUX_USB_READY_DELAY_S),
+             call(civswitch.CONTROLLER_WARMUP_SETTLE_S),
+             call(civswitch.LINUX_PREAMBLE_GAP_S)])
+
     def test_waits_until_host_configures_usb(self):
         with tempfile.TemporaryDirectory() as directory:
             controller = Path(directory) / 'controller'
@@ -570,6 +668,9 @@ class StartupTests(unittest.TestCase):
                 civswitch.run_single_line(str(payload), 2)
 
             writer.return_value.press_a.assert_called_once_with()
+            writer.return_value.press_button.assert_called_once_with(
+                civswitch.MASK_R,
+                hold_s=civswitch.CONTROLLER_WARMUP_HOLD_S)
             writer.return_value.type_line.assert_called_once_with('second')
             self.assertEqual(
                 writer.return_value.press_key.call_count, 3)
@@ -591,32 +692,264 @@ class StartupTests(unittest.TestCase):
                     civswitch.run_single_line(str(payload), 2)
             wait.assert_not_called()
 
-    def test_controller_diagnostic_sends_five_distinct_buttons_without_keyboard_input(self):
+    def test_raw_line_uses_keyboard_only_and_has_no_navigation_input(self):
+        with tempfile.TemporaryDirectory() as directory:
+            payload = Path(directory) / 'payload.txt'
+            payload.write_text('first\nsecond\n')
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output), \
+                    contextlib.redirect_stderr(output), \
+                    patch.object(civswitch, 'wait_for_usb'), \
+                    patch.object(civswitch, 'KeyboardHID') as keyboard, \
+                    patch.object(civswitch, 'HIDWriter') as gamepad_writer, \
+                    patch.object(civswitch.time, 'sleep'), \
+                    patch.object(civswitch, 'ensure_memory_headroom',
+                                 return_value=100000), \
+                    patch.object(civswitch, 'record_event') as record:
+                civswitch.run_raw_line(str(payload), 2)
+
+            gamepad_writer.assert_not_called()
+            keyboard.assert_called_once_with()
+            keyboard.return_value.type_line.assert_called_once_with('second')
+            self.assertEqual(
+                keyboard.return_value.press_key.call_args_list,
+                [call(civswitch.HID_KEY_ENTER,
+                      hold_s=civswitch.ENTER_HOLD_S),
+                 call(civswitch.HID_KEY_ENTER,
+                      hold_s=civswitch.ENTER_HOLD_S)])
+            keyboard.return_value.close.assert_called_once()
+            self.assertEqual(
+                [item.args[0] for item in record.call_args_list],
+                ['raw-line-start', 'raw-line-complete'])
+            self.assertTrue(all(
+                item.kwargs.get('keyboard_only')
+                for item in record.call_args_list))
+
+    def test_raw_line_rejects_an_out_of_range_line_before_usb_setup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            payload = Path(directory) / 'payload.txt'
+            payload.write_text('only line\n')
+            with patch.object(civswitch, 'wait_for_usb') as wait:
+                with self.assertRaisesRegex(ValueError, 'between 1 and 1'):
+                    civswitch.run_raw_line(str(payload), 2)
+            wait.assert_not_called()
+
+    def test_chat_keyboard_diagnostic_uses_one_composite_writer_and_does_not_submit(self):
+        with patch.object(civswitch, 'wait_for_usb'), \
+                patch.object(civswitch, 'HIDWriter') as writer, \
+                patch.object(civswitch, 'KeyboardHID') as keyboard, \
+                patch.object(civswitch.time, 'sleep') as sleep, \
+                patch.object(civswitch, 'ensure_memory_headroom',
+                             return_value=100000), \
+                patch.object(civswitch, 'reclaim_python_memory') as reclaim, \
+                patch.object(civswitch, 'record_event') as record:
+            civswitch.run_chat_keyboard_test()
+
+        keyboard.assert_not_called()
+        writer.assert_called_once_with()
+        writer.return_value.send_gamepad.assert_called_once_with(
+            civswitch.GAMEPAD_NEUTRAL)
+        writer.return_value.press_button.assert_called_once_with(
+            civswitch.MASK_R,
+            hold_s=civswitch.CONTROLLER_WARMUP_HOLD_S)
+        self.assertEqual(
+            writer.return_value.press_key.call_args_list,
+            [call(civswitch.HID_KEY_ESCAPE)])
+        writer.return_value.press_a.assert_called_once_with()
+        writer.return_value.type_line.assert_called_once_with(
+            civswitch.CHAT_KEYBOARD_TEST_TEXT)
+        self.assertEqual(
+            sleep.call_args_list,
+            [call(civswitch.LINUX_USB_READY_DELAY_S),
+             call(civswitch.CONTROLLER_WARMUP_SETTLE_S),
+             call(civswitch.ESC_TO_A_WAIT_S),
+             call(civswitch.POST_A_WAIT_S)])
+        reclaim.assert_called_once_with()
+        writer.return_value.close.assert_called_once()
+        self.assertEqual(
+            [item.args[0] for item in record.call_args_list],
+            ['chat-keyboard-test-start', 'chat-keyboard-test-complete'])
+
+    def test_controller_diagnostic_defaults_to_one_a_without_hidden_warmup(self):
         with patch.object(civswitch, 'wait_for_usb'), \
                 patch.object(civswitch, 'HIDWriter') as writer, \
                 patch.object(civswitch.time, 'sleep'), \
                 patch.object(civswitch, 'record_event') as record:
             civswitch.run_controller_test()
-        expected = [
-            call(civswitch.MASK_R,
-                 hold_s=civswitch.CONTROLLER_TEST_WARMUP_HOLD_S),
-            call(civswitch.MASK_A,
-                 hold_s=civswitch.CONTROLLER_TEST_HOLD_S),
-            call(civswitch.MASK_B,
-                 hold_s=civswitch.CONTROLLER_TEST_HOLD_S),
-            call(civswitch.MASK_X,
-                 hold_s=civswitch.CONTROLLER_TEST_HOLD_S),
-            call(civswitch.MASK_Y,
-                 hold_s=civswitch.CONTROLLER_TEST_HOLD_S),
-            call(civswitch.MASK_L,
-                 hold_s=civswitch.CONTROLLER_TEST_HOLD_S),
-        ]
-        self.assertEqual(writer.return_value.press_button.call_args_list, expected)
+        writer.return_value.send_gamepad.assert_called_once_with(
+            civswitch.GAMEPAD_NEUTRAL)
+        writer.return_value.press_button.assert_called_once_with(
+            civswitch.MASK_A, hold_s=civswitch.CONTROLLER_TEST_HOLD_S)
         writer.return_value.press_a.assert_not_called()
         writer.return_value.send_keyboard.assert_not_called()
         writer.return_value.type_line.assert_not_called()
-        record.assert_called_once()
+        self.assertEqual(
+            [item.args[0] for item in record.call_args_list],
+            ['controller-test-start', 'controller-test-complete'])
         writer.return_value.close.assert_called_once()
+
+    def test_controller_diagnostic_can_probe_one_named_button(self):
+        with patch.object(civswitch, 'wait_for_usb'), \
+                patch.object(civswitch, 'HIDWriter') as writer, \
+                patch.object(civswitch.time, 'sleep'), \
+                patch.object(civswitch, 'record_event'):
+            civswitch.run_controller_test('B')
+        writer.return_value.press_button.assert_called_once_with(
+            civswitch.MASK_B, hold_s=civswitch.CONTROLLER_TEST_HOLD_S)
+        writer.return_value.send_keyboard.assert_not_called()
+
+    def test_controller_diagnostic_can_probe_l_plus_r_registration_prompt(self):
+        with patch.object(civswitch, 'wait_for_usb'), \
+                patch.object(civswitch, 'HIDWriter') as writer, \
+                patch.object(civswitch.time, 'sleep'), \
+                patch.object(civswitch, 'record_event'):
+            civswitch.run_controller_test('LR')
+        writer.return_value.press_button.assert_called_once_with(
+            civswitch.MASK_L | civswitch.MASK_R,
+            hold_s=civswitch.CONTROLLER_TEST_HOLD_S)
+        writer.return_value.send_keyboard.assert_not_called()
+
+    def test_controller_warmup_diagnostic_presses_r_before_the_probe(self):
+        with patch.object(civswitch, 'wait_for_usb'), \
+                patch.object(civswitch, 'HIDWriter') as writer, \
+                patch.object(civswitch.time, 'sleep'), \
+                patch.object(civswitch, 'record_event') as record:
+            civswitch.run_controller_test('A', warmup=True)
+        writer.return_value.send_gamepad.assert_called_once_with(
+            civswitch.GAMEPAD_NEUTRAL)
+        self.assertEqual(
+            writer.return_value.press_button.call_args_list,
+            [call(civswitch.MASK_R,
+                  hold_s=civswitch.CONTROLLER_WARMUP_HOLD_S),
+             call(civswitch.MASK_A,
+                  hold_s=civswitch.CONTROLLER_TEST_HOLD_S)])
+        writer.return_value.send_keyboard.assert_not_called()
+        self.assertTrue(all(
+            item.kwargs.get('warmup') is True
+            for item in record.call_args_list))
+
+    def test_controller_preamble_diagnostic_matches_production_startup(self):
+        with patch.object(civswitch, 'wait_for_usb'), \
+                patch.object(civswitch, 'HIDWriter') as writer, \
+                patch.object(civswitch.time, 'sleep') as sleep, \
+                patch.object(civswitch, 'record_event') as record:
+            civswitch.run_controller_preamble_test()
+
+        writer.return_value.send_gamepad.assert_called_once_with(
+            civswitch.GAMEPAD_NEUTRAL)
+        writer.return_value.press_button.assert_called_once_with(
+            civswitch.MASK_R,
+            hold_s=civswitch.CONTROLLER_WARMUP_HOLD_S)
+        self.assertEqual(
+            writer.return_value.press_a.call_count,
+            civswitch.PREAMBLE_A_COUNT)
+        self.assertEqual(
+            sleep.call_args_list[:3],
+            [call(civswitch.LINUX_USB_READY_DELAY_S),
+             call(civswitch.CONTROLLER_WARMUP_SETTLE_S),
+             call(civswitch.LINUX_PREAMBLE_GAP_S)])
+        self.assertEqual(
+            [item.args[0] for item in record.call_args_list],
+            ['controller-preamble-test-start',
+             'controller-preamble-test-complete'])
+        writer.return_value.close.assert_called_once()
+
+    def test_controller_diagnostic_rejects_an_unknown_button_before_usb_setup(self):
+        with patch.object(civswitch, 'wait_for_usb') as wait:
+            with self.assertRaisesRegex(ValueError, 'Unknown controller button'):
+                civswitch.run_controller_test('Z')
+        wait.assert_not_called()
+
+    def test_keyboard_diagnostic_never_opens_or_writes_the_gamepad(self):
+        with patch.object(civswitch, 'wait_for_usb'), \
+                patch.object(civswitch, 'KeyboardHID') as keyboard, \
+                patch.object(civswitch.time, 'sleep'), \
+                patch.object(civswitch, 'record_event') as record:
+            civswitch.run_keyboard_test()
+        keyboard.assert_called_once_with()
+        keyboard.return_value.type_line.assert_called_once_with(
+            civswitch.KEYBOARD_TEST_TEXT)
+        keyboard.return_value.send_gamepad.assert_not_called()
+        self.assertEqual(
+            [item.args[0] for item in record.call_args_list],
+            ['keyboard-test-start', 'keyboard-test-complete'])
+        keyboard.return_value.close.assert_called_once()
+
+    def test_keyboard_alpha_diagnostic_types_a_to_z_without_gamepad(self):
+        with patch.object(civswitch, 'wait_for_usb'), \
+                patch.object(civswitch, 'KeyboardHID') as keyboard, \
+                patch.object(civswitch.time, 'sleep'), \
+                patch.object(civswitch, 'record_event') as record:
+            civswitch.run_keyboard_alpha_test()
+        keyboard.assert_called_once_with()
+        keyboard.return_value.type_line.assert_called_once_with(
+            'abcdefghijklmnopqrstuvwxyz')
+        keyboard.return_value.send_gamepad.assert_not_called()
+        self.assertEqual(
+            [item.args[0] for item in record.call_args_list],
+            ['keyboard-alpha-test-start', 'keyboard-alpha-test-complete'])
+        keyboard.return_value.close.assert_called_once()
+
+    def test_keyboard_hid_opens_only_the_keyboard_endpoint(self):
+        with patch.object(civswitch, 'HIDEndpoint') as endpoint:
+            keyboard = civswitch.KeyboardHID()
+        endpoint.assert_called_once_with(
+            '/dev/hidg1', civswitch.KBD_RELEASE)
+        self.assertFalse(hasattr(keyboard, 'gamepad'))
+
+    def test_keyboard_key_diagnostic_uses_only_keyboard_endpoint(self):
+        with patch.object(civswitch, 'wait_for_usb'), \
+                patch.object(civswitch, 'KeyboardHID') as keyboard, \
+                patch.object(civswitch.time, 'sleep'), \
+                patch.object(civswitch, 'record_event') as record:
+            civswitch.run_keyboard_key_test('slow')
+        keyboard.assert_called_once_with()
+        keyboard.return_value.press_key.assert_called_once_with(
+            civswitch.HID_KEY_A, hold_s=0.25)
+        keyboard.return_value.send_gamepad.assert_not_called()
+        self.assertEqual(
+            [item.args[0] for item in record.call_args_list],
+            ['keyboard-key-test-start', 'keyboard-key-test-complete'])
+        keyboard.return_value.close.assert_called_once()
+
+    def test_keyboard_key_repeat_is_bounded(self):
+        with patch.object(civswitch, 'wait_for_usb'), \
+                patch.object(civswitch, 'KeyboardHID') as keyboard, \
+                patch.object(civswitch.time, 'sleep'), \
+                patch.object(civswitch, 'record_event'):
+            civswitch.run_keyboard_key_test('repeat')
+        key_down = civswitch.pack_keyboard(keycode=civswitch.HID_KEY_A)
+        self.assertEqual(
+            keyboard.return_value.send_keyboard_repeated.call_args_list,
+            [call(key_down, 5, 0.015),
+             call(civswitch.KBD_RELEASE, 5, 0.015)])
+        keyboard.return_value.send_gamepad.assert_not_called()
+
+    def test_keyboard_key_prime_sends_bounded_neutral_reports_first(self):
+        with patch.object(civswitch, 'wait_for_usb'), \
+                patch.object(civswitch, 'KeyboardHID') as keyboard, \
+                patch.object(civswitch.time, 'sleep') as sleep, \
+                patch.object(civswitch, 'record_event'):
+            civswitch.run_keyboard_key_test('prime')
+        key_down = civswitch.pack_keyboard(keycode=civswitch.HID_KEY_A)
+        self.assertEqual(
+            keyboard.return_value.send_keyboard_repeated.call_args_list,
+            [call(civswitch.KBD_RELEASE,
+                  civswitch.KEYBOARD_PRIME_REPORT_COUNT,
+                  civswitch.KEYBOARD_PRIME_INTERVAL_S),
+             call(key_down, civswitch.KEYBOARD_TEST_REPEAT_COUNT,
+                  civswitch.KEYBOARD_TEST_REPEAT_INTERVAL_S),
+             call(civswitch.KBD_RELEASE,
+                  civswitch.KEYBOARD_TEST_REPEAT_COUNT,
+                  civswitch.KEYBOARD_TEST_REPEAT_INTERVAL_S)])
+        self.assertEqual(
+            sleep.call_args_list, [call(0.25), call(0.25), call(0.15)])
+        keyboard.return_value.send_gamepad.assert_not_called()
+
+    def test_keyboard_key_prime_rejects_unbounded_report_counts(self):
+        self.assertGreater(civswitch.KEYBOARD_PRIME_REPORT_COUNT, 0)
+        self.assertLessEqual(civswitch.KEYBOARD_PRIME_REPORT_COUNT, 128)
+        self.assertGreaterEqual(civswitch.KEYBOARD_PRIME_INTERVAL_S, 0.01)
 
 
 class ManualDeploymentTests(unittest.TestCase):
@@ -625,11 +958,22 @@ class ManualDeploymentTests(unittest.TestCase):
 
     def test_control_command_exposes_manual_operations_only(self):
         control = (self.root / 'civswitchctl').read_text()
-        for operation in ('start)', 'start-line)', 'test)', 'stop)',
-                          'status)', 'restore)'):
+        for operation in ('start)', 'start-line)', 'test)', 'test-warmup)',
+                          'test-preamble)',
+                          'keyboard)', 'keyboard-alpha)', 'keyboard-key)',
+                          'chat-keyboard)', 'raw-line)',
+                          'stop)', 'status)', 'restore)'):
             self.assertIn(operation, control)
+        self.assertIn('A|B|X|Y|L|R|LR|ZL|ZR|L3|R3', control)
         self.assertIn('start_job "line:$2"', control)
-        self.assertIn('start_job controller-test', control)
+        self.assertIn('start_job "controller-test:$button"', control)
+        self.assertIn('start_job "controller-warmup-test:$button"', control)
+        self.assertIn('start_job controller-preamble-test', control)
+        self.assertIn('start_job keyboard-test', control)
+        self.assertIn('start_job keyboard-alpha-test', control)
+        self.assertIn('start_job "keyboard-key:$2"', control)
+        self.assertIn('start_job chat-keyboard-test', control)
+        self.assertIn('start_job "raw-line:$2"', control)
         self.assertNotIn('civswitchctl boot', control)
 
     def test_job_runner_cleans_up_hid_and_stock_usb_on_every_exit(self):
@@ -640,6 +984,20 @@ class ManualDeploymentTests(unittest.TestCase):
         self.assertIn('CivSwitch: job cleanup started', runner)
         self.assertIn('line:*)', runner)
         self.assertIn('args=(--line "$line_number")', runner)
+        self.assertIn('controller-test:*)', runner)
+        self.assertIn('args=(--test-controller "$button")', runner)
+        self.assertIn('controller-warmup-test:*)', runner)
+        self.assertIn('args=(--test-controller-warmup "$button")', runner)
+        self.assertIn('controller-preamble-test)', runner)
+        self.assertIn('args=(--test-controller-preamble)', runner)
+        self.assertIn('keyboard-test) args=(--test-keyboard)', runner)
+        self.assertIn('keyboard-alpha-test) args=(--test-keyboard-alpha)', runner)
+        self.assertIn('keyboard-key:*)', runner)
+        self.assertIn('args=(--test-keyboard-key "$key_mode")', runner)
+        self.assertIn('chat-keyboard-test) args=(--test-chat-keyboard)', runner)
+        self.assertIn('slow|repeat|prime', runner)
+        self.assertIn('raw-line:*)', runner)
+        self.assertIn('args=(--raw-line "$line_number")', runner)
         self.assertLess(runner.index('trap cleanup'),
                         runner.index('usb-gadget-hid.sh'))
         control = (self.root / 'civswitchctl').read_text()
@@ -676,12 +1034,16 @@ class ManualDeploymentTests(unittest.TestCase):
         self.assertIn('chown root:root /root/.ssh/authorized_keys', installer)
         self.assertIn('chmod 600 /root/.ssh/authorized_keys', installer)
 
-    def test_single_host_helper_and_controller_warmup_are_documented(self):
+    def test_single_host_helper_and_focused_diagnostics_are_documented(self):
         helper = (self.root / 'luckfox-ssh-connect').read_text()
         control = (self.root / 'civswitchctl').read_text()
         guide = (self.root / 'FLASHING.md').read_text()
         self.assertIn('ProxyCommand ~/bin/luckfox-ssh-connect auto', guide)
-        self.assertIn('uncounted R', control)
+        self.assertIn('keyboard                     type CivSwitch through /dev/hidg1 only',
+                      control)
+        self.assertIn('test-warmup)', control)
+        self.assertIn('send uncounted R, then one gamepad button', control)
+        self.assertIn('keyboard-only', guide)
         self.assertIn('adb_up && connect_adb', helper)
         self.assertNotIn('yunpengs-luckfox-eth', helper)
 

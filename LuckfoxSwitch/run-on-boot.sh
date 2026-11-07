@@ -38,7 +38,43 @@ trap cleanup EXIT INT TERM
 echo "CivSwitch: starting $(date), mode=$MODE"
 case "$MODE" in
     payload) args=(/opt/civswitch/payload.txt) ;;
-    controller-test) args=(--test-controller) ;;
+    resume:*)
+        line_number=${MODE#resume:}
+        case "$line_number" in
+            ''|*[!0-9]*|0) echo 'Invalid resume line' >&2; exit 1 ;;
+        esac
+        [ -c /dev/hidg0 ] && [ -c /dev/hidg1 ] || {
+            echo 'HID is not connected; run civswitchctl prepare first.' >&2; exit 1;
+        }
+        args=(--resume "$line_number")
+        ;;
+    controller-test:*)
+        button=${MODE#controller-test:}
+        args=(--test-controller "$button")
+        ;;
+    controller-warmup-test:*)
+        button=${MODE#controller-warmup-test:}
+        args=(--test-controller-warmup "$button")
+        ;;
+    controller-preamble-test) args=(--test-controller-preamble) ;;
+    keyboard-test) args=(--test-keyboard) ;;
+    keyboard-alpha-test) args=(--test-keyboard-alpha) ;;
+    keyboard-key:*)
+        key_mode=${MODE#keyboard-key:}
+        case "$key_mode" in
+            slow|repeat|prime) ;;
+            *) echo "CivSwitch: invalid keyboard key mode '$key_mode'" >&2; exit 1 ;;
+        esac
+        args=(--test-keyboard-key "$key_mode")
+        ;;
+    chat-keyboard-test) args=(--test-chat-keyboard) ;;
+    raw-line:*)
+        line_number=${MODE#raw-line:}
+        case "$line_number" in
+            ''|*[!0-9]*|0) echo "CivSwitch: invalid line '$line_number'" >&2; exit 1 ;;
+        esac
+        args=(--raw-line "$line_number")
+        ;;
     line:*)
         line_number=${MODE#line:}
         case "$line_number" in
@@ -53,7 +89,10 @@ case "$MODE" in
 esac
 
 /opt/civswitch/setup-swap.sh || true
-/opt/civswitch/usb-gadget-hid.sh
+case "$MODE" in
+    resume:*) echo 'CivSwitch: reusing registered HID connection' ;;
+    *) /opt/civswitch/usb-gadget-hid.sh ;;
+esac
 python3 -u /opt/civswitch/civswitch.py "${args[@]}" &
 CHILD_PID=$!
 echo "$CHILD_PID" > "$CHILD_PIDFILE"

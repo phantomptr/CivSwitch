@@ -67,10 +67,14 @@ jobs:
       - name: Package LuckfoxSwitch
         run: |
           cp PicoSwitch/payload.txt LuckfoxSwitch/payload.txt
-          tar czf LuckfoxSwitch.tar.gz -C LuckfoxSwitch .
-          cd LuckfoxSwitch && zip -r ../LuckfoxSwitch.zip . && cd ..
+          tar --exclude='__pycache__' --exclude='*.pyc' czf LuckfoxSwitch.tar.gz -C LuckfoxSwitch .
+          cd LuckfoxSwitch && zip -r ../LuckfoxSwitch.zip . -x '*/__pycache__/*' '__pycache__/*' '*.pyc' && cd ..
           python3 LuckfoxSwitch/make_sd_swap_assets.py --output-dir /tmp/civswap-assets
           tar czf CIVSWAP-assets.tar.gz -C /tmp/civswap-assets .
+
+      - name: Checksum release assets
+        run: |
+          sha256sum PicoSwitch/build-pico1/src/civ7-pico1.uf2 PicoSwitch/build-pico2/src/civ7-pico2.uf2 LuckfoxSwitch.tar.gz LuckfoxSwitch.zip CIVSWAP-assets.tar.gz | sed 's@PicoSwitch/build-pico[12]/src/@@' > SHA256SUMS
 
       # --- Upload artifacts (available on every run) ---
       - uses: actions/upload-artifact@v4
@@ -98,6 +102,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          draft: true
           generate_release_notes: true
           files: |
             PicoSwitch/build-pico2/src/civ7-pico2.uf2
@@ -105,3 +110,4 @@ jobs:
             LuckfoxSwitch.tar.gz
             LuckfoxSwitch.zip
             CIVSWAP-assets.tar.gz
+            SHA256SUMS

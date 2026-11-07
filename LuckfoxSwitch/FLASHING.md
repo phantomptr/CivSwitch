@@ -2,7 +2,7 @@
 
 This guide installs Buildroot onto the **Luckfox Pico Pro or Max onboard SPI NAND**, then installs CivSwitch with manual control over Ethernet SSH. The two boards share one official Pro/Max image and the same board layout; the physical CivSwitch run used a Pico Pro, while Max uses the same software path but has not been run separately. No computer or SD card is required while using it on the Switch, although an optional card can provide swap. It is not a UF2 workflow: Raspberry Pi Pico1/Pico2 UF2 files cannot be flashed to this Linux board.
 
-The procedure below was performed on a Pico Pro using macOS, `upgrade_tool` v2.44, and `Luckfox_Pico_Pro_Max_Flash_250607/update.img`. The final Switch 2 run completed **87/87**, brought up the Remote JS Loader, and installed the persistent `XSTRIG.Civ7Save` trigger. It made 357 gamepad and 23,437 keyboard state writes, kept USB configured, retained about 96 MB available, and did not need swap. Every key transition now waits for endpoint acceptance; unchanged reports are coalesced and Python memory is reclaimed at safe line boundaries. Logs remain on NAND across boots.
+The procedure below was performed on a Pico Pro using macOS, `upgrade_tool` v2.44, and `Luckfox_Pico_Pro_Max_Flash_250607/update.img`. The final Switch 2 run completed **87/87**, brought up the Remote JS Loader, and installed the persistent `XSTRIG.Civ7Save` trigger. It made 357 gamepad and 23,437 keyboard state writes, kept USB configured, retained about 96 MB available, and did not need swap. Every key transition now waits for endpoint acceptance; unchanged reports are coalesced and Python memory is reclaimed at safe line boundaries. Logs remain on NAND across boots. Switch 1 subsequently completed the same payload and executed remote hello-world with the keyboard control-channel fix; see [FINDINGS.md](FINDINGS.md).
 
 ## 1. Download the tools and firmware
 
@@ -167,7 +167,7 @@ If USB RNDIS remains available, configure the Mac interface for that fallback as
 
 ## 7. Prepare the Switch, then control manually
 
-Use the physical Civilization VII cartridge running **version 1.0.0**, with the Switch language and USB keyboard layout set to **English (US)**. Open **MULTIPLAYER → WIRELESS → CREATE GAME → HOST LOBBY → CHAT**, and focus the chat input.
+Use the physical Civilization VII cartridge running **version 1.0.0**, with the Switch language and USB keyboard layout set to **English (US)**. Open **MULTIPLAYER → WIRELESS → CREATE GAME → HOST LOBBY → CHAT**. With the normal controller, select the chat text field so the message caret is active; merely seeing the chat panel is not sufficient. Use **docked mode** for the Switch 1 USB path, then connect the board. CivSwitch does not navigate to chat by itself. Its fixed five-A preamble handles the post-enumeration controller/menu state, and the per-line `Esc → A` reasserts chat/OSK focus before USB-keyboard input.
 
 Connect the board's Ethernet port to the same LAN as the Mac, leave the OTG USB cable disconnected from the computer, and connect it to the prepared Switch only after Linux has booted. From the Mac, the single supported SSH command is:
 
@@ -175,15 +175,65 @@ Connect the board's Ethernet port to the same LAN as the Mac, leave the OTG USB 
 ssh yunpengs-luckfox
 ```
 
-Open the Switch's controller input-test screen, connect the Luckfox OTG cable, then run over Ethernet SSH:
+The Switch's controller-registration screen asks for **L + R**; its **Test Input** screen accepts individual button probes. Connect the Luckfox OTG cable, then use the command matching the visible screen.
+
+For controller registration, run:
 
 ```bash
-civswitchctl test
+civswitchctl test LR
+```
+
+This sends L and R together in one report. For the input-test screen, run:
+
+```bash
+civswitchctl test A
 civswitchctl status
 civswitchctl stop
 ```
 
-The test waits four seconds after USB is configured and sends an uncounted `R` warm-up for 350 ms. After another two seconds it sends `A`, `B`, `X`, `Y`, and `L`, with a 200 ms hold and one-second gap for each counted button. Confirm the warm-up wakes the controller pipeline and all five distinct counted buttons appear in order, then stop the test and move to chat.
+The single-button test waits four seconds after USB is configured and sends exactly one neutral-to-pressed-to-neutral `A` transition, held for 200 ms. It sends no hidden warm-up button and no text. Confirm that one `A` appears. If input is intermittent, cold-replug the board and repeat the same check. To probe a different controller input, use `civswitchctl test B`; valid choices are `A`, `B`, `X`, `Y`, `L`, `R`, `LR`, `ZL`, `ZR`, `L3`, and `R3`.
+
+The earlier successful Switch 1 `B X Y L` result was on the Test Input screen, not the registration screen, and it does not establish that a single `A` should satisfy an **L + R** prompt.
+
+The first successful Switch 1 probe used an uncounted `R` first. To compare that exact behavior without changing `test A`, run:
+
+```bash
+civswitchctl test-warmup A
+```
+
+This sends `R`, waits two seconds, and then sends `A`. Clean `A` must remain the first check, and the warm-up variant answers only whether the first controller state needs an initialization press.
+
+The production controller startup now performs this bounded sequence once per HID enumeration: initial neutral report, a four-second USB settle, uncounted `R`, a two-second settle, then five `A` presses at one-second intervals. To validate the same sequence without typing:
+
+```bash
+civswitchctl test-preamble
+```
+
+On the **Test Input** screen, Switch 1 should swallow the `R` and show exactly five `A` presses. This controller diagnostic keeps HID active afterward; run `civswitchctl stop` to restore stock RNDIS+ADB. After stopping, `civswitchctl status` should return to idle. Use `civswitchctl stop` only to abort a job while it is still running.
+
+Controller registration and keyboard payload delivery are separate checks. After the controller test, focus the Switch chat input and run:
+
+```bash
+civswitchctl keyboard
+```
+
+This keyboard-only diagnostic opens `/dev/hidg1` but never opens or writes the gamepad at `/dev/hidg0`. It should type exactly `CivSwitch`. If keyboard-only delivery works while the controller button does not, investigate composite gamepad registration rather than chat focus or macro timing. Switch 1 and Switch 2 now have full loader validation; controller registration alone is still not proof of keyboard delivery.
+
+For the combined chat smoke test, keep the chat field focused and run:
+
+```bash
+civswitchctl chat-keyboard
+```
+
+This diagnostic uses one composite HID writer: it waits four seconds for USB configuration, sends the uncounted `R` warm-up and its two-second settle, sends `Esc -> A` with the production 800/1200 ms focus waits, and types exactly `CivSwitch1`. It does not send Enter or any payload line. If the warm-up controller press is visible but the text is not, isolate keyboard delivery or chat focus inside the composite enumeration. It closes HID and exits after the bounded sequence, so the normal cleanup restores stock RNDIS+ADB automatically; `civswitchctl status` should return to idle. Use `civswitchctl stop` only if the job is still running and must be aborted.
+
+To type and submit the first full payload line without any controller or navigation input:
+
+```bash
+civswitchctl raw-line 1
+```
+
+This opens only `/dev/hidg1`, types the line beginning `1/87`, and sends `Enter` twice. It sends no `Esc` and no gamepad `A`. Visible `1/87` proves that the keyboard endpoint and long-line chat handling work; it does not prove controller registration. If `keyboard` works but `raw-line 1` does not, investigate payload-length/chat handling. If `raw-line 1` works but `start-line 1` does not, investigate `Esc`/gamepad-`A` virtual-keyboard focus.
 
 To inspect one exact payload line without the five-A preamble:
 
@@ -191,14 +241,14 @@ To inspect one exact payload line without the five-A preamble:
 civswitchctl start-line 10
 ```
 
-The verified path is the full run:
+For a new controller connection, use the [prepare / press / resume workflow](README.md#registered-controller-workflow-switch-1-and-switch-2). It preserves registration instead of reconnecting between button presses and typing. The legacy full-run command remains:
 
 ```bash
 civswitchctl start
 civswitchctl status
 ```
 
-The full payload takes approximately 15–20 minutes. Follow progress with:
+The full payload takes approximately 20–25 minutes. Follow progress with:
 
 ```bash
 tail -f /opt/civswitch/logs/current.log

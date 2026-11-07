@@ -8,17 +8,21 @@ set -eu
 PATH="/opt/homebrew/bin:$HOME/Library/Android/sdk/platform-tools:$PATH"
 export PATH
 
+# Prefer macOS netcat; Homebrew netcat may fail local-network access.
+NC=/usr/bin/nc
+[ -x "$NC" ] || NC=nc
+
 MODE="${1:-auto}"
 ETHERNET=192.168.86.198
 USB_BOARD=192.168.77.1
 ADB_PORT=2222
 
 eth_up() {
-    nc -z -w 1 "$ETHERNET" 22 2>/dev/null
+    "$NC" -z -w 1 "$ETHERNET" 22 2>/dev/null
 }
 
 usb_up() {
-    nc -z -w 1 "$USB_BOARD" 22 2>/dev/null
+    "$NC" -z -w 1 "$USB_BOARD" 22 2>/dev/null
 }
 
 # Other ADB devices may be attached. The Luckfox vendor image reports a
@@ -37,16 +41,16 @@ adb_up() {
 }
 
 connect_eth() {
-    exec nc "$ETHERNET" 22
+    exec "$NC" "$ETHERNET" 22
 }
 
 connect_usb() {
-    exec nc "$USB_BOARD" 22
+    exec "$NC" "$USB_BOARD" 22
 }
 
 connect_adb() {
     adb forward "tcp:$ADB_PORT" tcp:22 </dev/null >/dev/null 2>&1 || true
-    exec nc localhost "$ADB_PORT"
+    exec "$NC" localhost "$ADB_PORT"
 }
 
 case "$MODE" in

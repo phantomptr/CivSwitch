@@ -12,7 +12,7 @@ case "${1:-}" in
         mode=$(cat "$MODEFILE" 2>/dev/null || echo off)
         case "$mode" in
             off) exit 0 ;;
-            payload|controller-test) ;;
+            payload|controller-test:*|keyboard-test|chat-keyboard-test) ;;
             *) echo "CivSwitch: invalid mode '$mode'" >&2; exit 1 ;;
         esac
         start-stop-daemon -S -b -m -p "$PIDFILE" \

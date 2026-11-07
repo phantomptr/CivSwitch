@@ -38,9 +38,9 @@ if [ -z "$UDC" ]; then
     exit 1
 fi
 
-# The Switch reissues SET_CONFIGURATION while its controller view initializes.
-# Rockchip's Android configfs uevent path logs each request. At 100+ events per
-# second, serial console output consumed almost the entire CPU. Suppress only
+# Rockchip configfs can log CONFIGURED for HID SET_REPORT as well as actual
+# SET_CONFIGURATION: both requests have bRequest=9. These messages alone do
+# not prove a USB reset. Repeated console output consumed CPU. Suppress only
 # the console log level for the duration of CivSwitch; restore-default-gadget
 # restores the saved value.
 PRINTK_STATE=/run/civswitch.printk
@@ -184,6 +184,10 @@ mkdir -p "$HID1"
 echo 1 > "$HID1/protocol"
 echo 1 > "$HID1/subclass"
 echo 8 > "$HID1/report_length"
+# Accept keyboard LED SET_REPORT requests over the control endpoint. With
+# an interrupt OUT endpoint, this kernel's f_hid stalls those requests;
+# the Switch then flickers its keyboard and drops input characters.
+echo 1 > "$HID1/no_out_endpoint"
 
 # Keyboard report descriptor (63 bytes — matches keyboard_usb_report_descriptor)
 python3 -c "

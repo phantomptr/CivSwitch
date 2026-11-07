@@ -2,9 +2,9 @@
 """Generate include/macro_script.h from payload.txt.
 
 Each non-empty line of payload.txt becomes one keystroke batch:
-  press Esc, wait 750 ms, press gamepad A, wait 550 ms, type the line,
-  press Enter twice, then (between batches only) wait 0.75 s, press the
-  gamepad A button, wait 0.55 s. A fixed preamble (A x5) runs first.
+  press Esc, wait 800 ms, press gamepad A, wait 1200 ms, type the line,
+  press Enter twice, then (between batches only) wait 0.8 s, press the
+  gamepad A button, wait 1.2 s. A fixed preamble (A x5) runs first.
 
 Typing sends one new key per report - the only way to guarantee character
 order, since a HID report is an unordered *set* of pressed keys. For speed,
@@ -21,19 +21,20 @@ Usage: payload_to_macro.py <payload.txt> <output header>
 import sys
 
 # --- timings (hardware-tested values; do not lower without a timing test) ---
-KEY_HOLD_MS = 32
-KEY_GAP_MS = 32
+# CivSwitch upstream 09ee3dd fixed Switch 1 instability with these values.
+KEY_HOLD_MS = 40
+KEY_GAP_MS = 40
 # Experimental: pack up to 6 keys per report (~6x faster, but the host may
 # type them out of order - see module docstring). Keep False for reliable output.
 USE_6KRO = False
-ENTER_HOLD_MS = 32
+ENTER_HOLD_MS = 40
 ENTER_GAP_MS = 200
-PRE_A_WAIT_MS = 750    # wait right before the A press between batches
-POST_A_WAIT_MS = 550   # wait after the batch-start and separator A presses
+PRE_A_WAIT_MS = 800    # wait right before the A press between batches
+POST_A_WAIT_MS = 1200  # wait after the batch-start and separator A presses
 A_PRESS_MS = 50
 PREAMBLE_A_COUNT = 5
-PREAMBLE_GAP_MS = 550  # wait after each preamble A press
-ESC_TO_A_WAIT_MS = 750  # wait between the Esc key and the A press at batch start
+PREAMBLE_GAP_MS = 800  # wait after each preamble A press
+ESC_TO_A_WAIT_MS = 800  # wait between the Esc key and the A press at batch start
 
 # US QWERTY printable ASCII -> (needs_shift, HID_KEY_* name)
 ASCII_TO_KEY = {" ": (0, "HID_KEY_SPACE"), "\t": (0, "HID_KEY_TAB")}

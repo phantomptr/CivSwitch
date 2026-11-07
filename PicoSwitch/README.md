@@ -50,5 +50,12 @@ python tools/pack_uf2.py build-pico2/src/civ7-pico2.bin civ7-pico2.uf2 [rp2040|r
 ## Macro shape
 
 Preamble: gamepad A x5.
-Per payload line: Esc, wait 750 ms, A, wait 550 ms, type line, Enter x2, then A between batches.
+Per payload line: Esc, wait 800 ms, A, wait 1200 ms, type line, Enter x2, then A between batches.
 Timings are hardware-tested constants at the top of `tools/payload_to_macro.py` - do not lower without re-testing.
+
+Before connecting the Pico, put the Switch in docked mode and use the normal controller to
+select/focus the chat text field, not merely open the chat panel. CivSwitch cannot navigate
+from the game lobby to chat; its fixed five-A preamble only clears the controller/menu state
+after enumeration. The per-line `Esc → A` then reasserts the chat/OSK focus before USB-keyboard
+input. Switch 1 needs the current 1200 ms post-A window; the older 550 ms timing caused the
+text field/OSK focus to change while text was being sent.
