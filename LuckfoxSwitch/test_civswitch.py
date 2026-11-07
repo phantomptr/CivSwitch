@@ -398,6 +398,10 @@ class MacroParityTests(unittest.TestCase):
                  root / 'LuckfoxSwitch/payload.txt')
         if not all(path.exists() for path in paths):
             self.skipTest('Generate the payload before checking deployed parity')
+        # Changing the JS source requires rebuilding and validating the frozen payload.
+        self.assertEqual(
+            hashlib.sha256((root / 'core.js').read_bytes()).hexdigest(),
+            '1fe1aaa68dc8c0534d79d65b1dd545f66c6b3fb3d547f01c967cdc5f70e7bdf4')
         payloads = [path.read_bytes() for path in paths]
         self.assertEqual(payloads[0], payloads[1])
         self.assertEqual(len(payloads[0].splitlines()), 87)

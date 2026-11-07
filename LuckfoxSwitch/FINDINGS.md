@@ -11,6 +11,10 @@ The Switch 1 run sent line 1 separately, registered the controller, resent line 
 
 The release's `prepare`, `press`, and `resume` commands package that sequence without temporary scripts. Their command plumbing has host tests; the recorded physical run used the equivalent bounded Python calls before those commands were added. Switch 2's physical run predates the new keyboard output setting. A new Switch 2 regression run with the final v1.2 archive has not been performed. Max and other Luckfox models have not been separately tested. Switch 1 persistent-save installation was not performed in this run.
 
+## Release reproducibility
+
+The release uses the exact hardware-validated 87-line `PicoSwitch/payload.txt` (SHA-256 `3b0f97d015fd465fcf60bbd302aebd56bc2268730d03188f543cf791f9fb240f`). CI copies it to the Luckfox package before parity tests. Regenerating compressed output under another Node/zlib build produced different bytes despite unchanged source, so release builds no longer regenerate it. Source and payload hashes are checked together to catch stale artifacts.
+
 ## Keyboard flicker and missing letters
 
 With keyboard interrupt-OUT enabled, the Switch 1 alphabet test produced `cdghklopstwx`. Adding explicit 250 ms key holds and 500 ms release gaps still produced only `acegijlnpqsuwz`. Forcing full-speed USB also failed to cure flicker. Slower typing and USB speed were insufficient fixes.

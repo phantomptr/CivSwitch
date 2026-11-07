@@ -8,6 +8,7 @@
 - Use 40 ms key holds and 800/1200 ms focus waits consistently in the Pico generator and Luckfox macro.
 - Prefer macOS system netcat in the single SSH helper; preserve Ethernet → RNDIS → ADB fallback.
 - Document physical validation, the misleading CONFIGURED notification, recovery, flashing, and hardware coverage. Switch 1 reached the loader and executed hello-world; the earlier Switch 2 run also completed the persistent installer.
+- Freeze the hardware-validated 87-line payload in source control and check its source/hash parity before packaging.
 - Exclude Python caches from release archives and publish SHA-256 checksums.
 
 The new keyboard output setting has physical Switch 1 validation. Switch 2's prior successful run predates that setting; Max and other Luckfox variants remain untested separately. See [the full findings](LuckfoxSwitch/FINDINGS.md).

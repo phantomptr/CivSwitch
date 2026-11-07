@@ -15,16 +15,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # --- Payload generation ---
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Generate payload.txt
-        working-directory: PicoSwitch
-        run: |
-          npm install
-          node compress.js
+      # Release the exact payload used in physical validation. Regenerating it
+      # across Node/zlib versions can change the compressed bytes.
+      - name: Stage hardware-validated payload
+        run: cp PicoSwitch/payload.txt LuckfoxSwitch/payload.txt
 
       - name: Verify Luckfox transport and Pico macro parity
         run: |

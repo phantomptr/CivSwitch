@@ -3,6 +3,8 @@
 Raspberry Pi Pico firmware (RP2350, or RP2040 for the Pico 1): Switch gamepad + USB keyboard macro that types the CIV7 chat-XSS payload once, ~10 s after boot (`MACRO_START_DELAY_MS` in `include/MacroEngine.h`).
 LED is lit while the macro runs.
 
+Release builds use the checked-in, hardware-validated `payload.txt` without recompressing it. Node/zlib versions can produce different compressed bytes. Regenerate only when changing the JavaScript payload, then revalidate it and update the source/payload hash assertions in `LuckfoxSwitch/test_civswitch.py` before releasing.
+
 ## Payload pipeline
 
 ```
